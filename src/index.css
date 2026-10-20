@@ -1,0 +1,183 @@
+@import "tailwindcss";
+
+:root {
+  /* Base Backgrounds */
+  --bg-abyss: #0D0618;          /* 最背面：アビス・バイオレット */
+  --bg-panel: #180B29;          /* パネル背景：ダーク・プラム */
+  --bg-panel-alt: #101426;      /* サブパネル：ディープ・インディゴ */
+  --bg-grid: rgba(255, 30, 122, 0.07); /* 背景ディザ・グリッド線 */
+
+  /* Primary Neon Accents */
+  --neon-cyan: #00F5D4;         /* プライマリ：解析・SYNC率・アクティブチャンク枠 */
+  --neon-cyan-dim: rgba(0, 245, 212, 0.2);
+  --neon-magenta: #FF1E7A;      /* セカンダリ：重要枠・警告・BPM・オーバークロック状態 */
+  --neon-magenta-dim: rgba(255, 30, 122, 0.25);
+  --neon-yellow: #FFE600;       /* アクセント：選択中カード・決定アクション・クリティカル正解 */
+  --neon-yellow-dim: rgba(255, 230, 0, 0.2);
+
+  /* Typography Colors */
+  --text-primary: #F2F5F8;      /* 本文（高視認性オフホワイト） */
+  --text-muted: #6C7A89;        /* 未読/通過済みチャンク・非アクティブ要素 */
+  --text-terminal: #00F5D4;     /* メタデータ・計器テキスト */
+
+  /* Font Stacks */
+  --font-mono: 'JetBrains Mono', 'Share Tech Mono', monospace;
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+* {
+  border-radius: 0 !important;
+}
+
+body {
+  background-color: var(--bg-abyss);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  overflow-x: hidden;
+  background-image:
+    linear-gradient(to right, var(--bg-grid) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--bg-grid) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+.font-terminal {
+  font-family: var(--font-mono);
+  letter-spacing: 0.04em;
+}
+
+/* Section 2.2: チャンファー（斜め角落とし）パネル */
+.cyber-panel {
+  background: var(--bg-panel);
+  border: 1px solid var(--neon-cyan);
+  clip-path: polygon(
+    0 0, calc(100% - 12px) 0, 100% 12px,
+    100% 100%, 12px 100%, 0 calc(100% - 12px)
+  );
+  box-shadow: inset 0 0 15px rgba(0, 245, 212, 0.08);
+}
+
+/* Chamfered wrapper that preserves crisp 1px diagonal border along clipped corners */
+.chamfer-frame {
+  position: relative;
+  clip-path: polygon(
+    0 0,
+    calc(100% - var(--chamfer-size, 12px)) 0,
+    100% var(--chamfer-size, 12px),
+    100% 100%,
+    var(--chamfer-size, 12px) 100%,
+    0 calc(100% - var(--chamfer-size, 12px))
+  );
+  padding: 1px;
+  background: var(--chamfer-border, var(--neon-cyan));
+}
+
+.chamfer-inner {
+  clip-path: polygon(
+    0 0,
+    calc(100% - var(--chamfer-size, 12px)) 0,
+    100% var(--chamfer-size, 12px),
+    100% 100%,
+    var(--chamfer-size, 12px) 100%,
+    0 calc(100% - var(--chamfer-size, 12px))
+  );
+  background: var(--chamfer-bg, var(--bg-panel));
+  box-shadow: inset 0 0 18px var(--chamfer-glow, rgba(0, 245, 212, 0.08));
+  height: 100%;
+  width: 100%;
+}
+
+/* Chamfered button */
+.cyber-btn {
+  position: relative;
+  font-family: var(--font-mono);
+  clip-path: polygon(
+    0 0,
+    calc(100% - 8px) 0,
+    100% 8px,
+    100% 100%,
+    8px 100%,
+    0 calc(100% - 8px)
+  );
+  transition: transform 0.08s ease, filter 0.12s ease, background-color 0.12s ease;
+  cursor: pointer;
+}
+
+.cyber-btn:active {
+  transform: scale(0.98);
+}
+
+/* CRT Scanline Overlay with Reading Zone Mask */
+.crt-scanlines {
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0) 0px,
+    rgba(255, 255, 255, 0) 2px,
+    rgba(0, 245, 212, 0.04) 3px,
+    rgba(0, 0, 0, 0.18) 4px
+  );
+}
+
+.crt-mask-reading-zone {
+  /* Mask out the center reading viewport to guarantee 100% text legibility */
+  -webkit-mask-image: radial-gradient(
+    ellipse 52% 38% at 50% 50%,
+    transparent 0%,
+    transparent 65%,
+    black 100%
+  );
+  mask-image: radial-gradient(
+    ellipse 52% 38% at 50% 50%,
+    transparent 0%,
+    transparent 65%,
+    black 100%
+  );
+}
+
+/* Phase 2/3 Juice Effects: Screen Shake & Chromatic Aberration */
+@keyframes cyber-shake {
+  0%, 100% { transform: translate(0, 0); }
+  15% { transform: translate(-6px, 4px); }
+  30% { transform: translate(6px, -4px); }
+  45% { transform: translate(-5px, -3px); }
+  60% { transform: translate(5px, 3px); }
+  75% { transform: translate(-3px, 2px); }
+  90% { transform: translate(2px, -2px); }
+}
+
+@keyframes chromatic-flash {
+  0% {
+    filter: drop-shadow(-4px 0 0 #FF1E7A) drop-shadow(4px 0 0 #00F5D4) brightness(1.35);
+  }
+  50% {
+    filter: drop-shadow(3px 0 0 #FF1E7A) drop-shadow(-3px 0 0 #FFE600) brightness(1.15);
+  }
+  100% {
+    filter: none;
+  }
+}
+
+.animate-cyber-shake {
+  animation: cyber-shake 0.32s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+}
+
+.animate-chromatic-flash {
+  animation: chromatic-flash 0.38s ease-out both;
+}
+
+/* Custom thin cyber scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-abyss);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 245, 212, 0.3);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--neon-cyan);
+}
