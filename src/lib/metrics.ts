@@ -179,7 +179,7 @@ export function computeNextTargetWpm(
   }
   if (syncRate < 0.7) {
     return {
-      nextWpm: Math.max(100, Math.round(currentTargetWpm * 0.95)),
+      nextWpm: Math.max(60, Math.round(currentTargetWpm * 0.95)),
       status: 'DESYNC (-5%)',
     };
   }

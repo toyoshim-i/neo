@@ -26,7 +26,7 @@ export function getSavedTargetWpm(): number {
   if (typeof window !== 'undefined') {
     const raw = window.localStorage.getItem(LAST_WPM_STORAGE_KEY);
     const parsed = raw ? Number(raw) : NaN;
-    if (Number.isFinite(parsed) && parsed >= 100 && parsed <= 900) {
+    if (Number.isFinite(parsed) && parsed >= 60 && parsed <= 900) {
       return Math.round(parsed);
     }
   }
@@ -34,7 +34,7 @@ export function getSavedTargetWpm(): number {
 }
 
 export function saveTargetWpmPreference(wpm: number): void {
-  const clamped = Math.max(100, Math.min(900, Math.round(wpm)));
+  const clamped = Math.max(60, Math.min(900, Math.round(wpm)));
   if (typeof window !== 'undefined') {
     window.localStorage.setItem(LAST_WPM_STORAGE_KEY, String(clamped));
   }

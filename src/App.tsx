@@ -455,11 +455,13 @@ export function App() {
         }
       } else if (e.code === 'ArrowUp') {
         e.preventDefault();
-        setTargetWpm((w) => Math.min(800, w + 20));
+        const step = e.shiftKey ? 1 : 10;
+        setTargetWpm((w) => Math.min(900, w + step));
         soundEngine.playUiClick();
       } else if (e.code === 'ArrowDown') {
         e.preventDefault();
-        setTargetWpm((w) => Math.max(100, w - 20));
+        const step = e.shiftKey ? 1 : 10;
+        setTargetWpm((w) => Math.max(60, w - step));
         soundEngine.playUiClick();
       }
     };
@@ -766,49 +768,132 @@ export function App() {
                 {MODE_INFO[selectedMode].shortDesc}
               </p>
 
-              {/* Target Speed Control */}
-              <div className="pt-3 border-t border-[#00F5D4]/20 flex items-center justify-between gap-4">
-                <div>
-                  <div className="font-terminal text-xs text-[#6C7A89]">
-                    TARGET READING SPEED
+              {/* Target Speed Control (Dual ±10 / ±1 steppers + direct input + 1-WPM slider) */}
+              <div className="pt-3 border-t border-[#00F5D4]/20 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <div className="font-terminal text-xs text-[#6C7A89]">
+                      TARGET READING SPEED
+                    </div>
+                    <div className="text-[11px] text-[#6C7A89] mt-0.5">
+                      L2 Start: <span className="text-[#F2F5F8]">150</span> · Native Avg:{' '}
+                      <span className="text-[#F2F5F8]">238 WPM</span>
+                      {profile.bestEffectiveWpm > 0 && (
+                        <span className="ml-2 text-[#FF1E7A]">
+                          · Best: {profile.bestEffectiveWpm} eWPM
+                        </span>
+                      )}
+                    </div>
                   </div>
-                  <div className="text-[11px] text-[#6C7A89] mt-0.5">
-                    Native Avg: <span className="text-[#F2F5F8]">238 WPM</span>
-                    {profile.bestEffectiveWpm > 0 && (
-                      <span className="ml-2 text-[#FF1E7A]">
-                        · Self Best: {profile.bestEffectiveWpm} eWPM
+
+                  <div className="flex items-center gap-1.5 font-terminal self-start sm:self-auto">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        soundEngine.playUiClick();
+                        setTargetWpm((w) => Math.max(60, w - 10));
+                      }}
+                      title="Decrease by 10 WPM"
+                      className="cyber-btn px-2.5 h-9 bg-[#0D0618] border border-[#00F5D4]/60 text-xs text-[#00F5D4] font-bold hover:bg-[#00F5D4]/15"
+                    >
+                      -10
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        soundEngine.playUiClick();
+                        setTargetWpm((w) => Math.max(60, w - 1));
+                      }}
+                      title="Fine-tune -1 WPM"
+                      className="cyber-btn px-2.5 h-9 bg-[#0D0618] border border-[#6C7A89]/60 text-xs text-[#F2F5F8] font-bold hover:border-[#00F5D4] hover:text-[#00F5D4]"
+                    >
+                      -1
+                    </button>
+
+                    <div className="px-3 h-9 bg-[#0D0618] border border-[#00F5D4] flex items-center justify-center min-w-[108px]">
+                      <input
+                        type="number"
+                        min={60}
+                        max={900}
+                        step={1}
+                        value={targetWpm}
+                        onChange={(e) => {
+                          const val = Number(e.target.value);
+                          if (Number.isFinite(val)) {
+                            setTargetWpm(
+                              Math.max(60, Math.min(900, Math.round(val)))
+                            );
+                          }
+                        }}
+                        aria-label="Target WPM"
+                        className="w-14 bg-transparent text-right text-lg font-bold text-[#00F5D4] focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                      />
+                      <span className="text-[11px] text-[#6C7A89] ml-1.5">
+                        WPM
                       </span>
-                    )}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        soundEngine.playUiClick();
+                        setTargetWpm((w) => Math.min(900, w + 1));
+                      }}
+                      title="Fine-tune +1 WPM"
+                      className="cyber-btn px-2.5 h-9 bg-[#0D0618] border border-[#6C7A89]/60 text-xs text-[#F2F5F8] font-bold hover:border-[#00F5D4] hover:text-[#00F5D4]"
+                    >
+                      +1
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        soundEngine.playUiClick();
+                        setTargetWpm((w) => Math.min(900, w + 10));
+                      }}
+                      title="Increase by 10 WPM"
+                      className="cyber-btn px-2.5 h-9 bg-[#0D0618] border border-[#00F5D4]/60 text-xs text-[#00F5D4] font-bold hover:bg-[#00F5D4]/15"
+                    >
+                      +10
+                    </button>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 font-terminal">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      soundEngine.playUiClick();
-                      setTargetWpm((w) => Math.max(100, w - 20));
-                    }}
-                    className="cyber-btn w-9 h-9 bg-[#0D0618] border border-[#00F5D4]/60 text-[#00F5D4] font-bold hover:bg-[#00F5D4]/15"
-                  >
-                    -
-                  </button>
-                  <div className="px-4 py-1.5 bg-[#0D0618] border border-[#00F5D4] text-center min-w-[110px]">
-                    <span className="text-xl font-bold text-[#00F5D4]">
-                      {targetWpm}
-                    </span>
-                    <span className="text-xs text-[#6C7A89] ml-1">WPM</span>
+                {/* Continuous 1-WPM Slider with Quick Anchor Marks */}
+                <div className="space-y-1">
+                  <input
+                    type="range"
+                    min={80}
+                    max={500}
+                    step={1}
+                    value={Math.min(500, Math.max(80, targetWpm))}
+                    onChange={(e) => setTargetWpm(Number(e.target.value))}
+                    className="w-full h-1.5 bg-[#0D0618] accent-[#00F5D4] cursor-pointer"
+                  />
+                  <div className="flex justify-between font-terminal text-[10px] text-[#6C7A89]">
+                    <span>80</span>
+                    <button
+                      type="button"
+                      onClick={() => setTargetWpm(150)}
+                      className="hover:text-[#00F5D4] cursor-pointer"
+                    >
+                      150 (L2 START)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTargetWpm(238)}
+                      className="hover:text-[#00F5D4] cursor-pointer"
+                    >
+                      238 (NATIVE AVG)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTargetWpm(350)}
+                      className="hover:text-[#00F5D4] cursor-pointer"
+                    >
+                      350 (PRO)
+                    </button>
+                    <span>500+</span>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      soundEngine.playUiClick();
-                      setTargetWpm((w) => Math.min(800, w + 20));
-                    }}
-                    className="cyber-btn w-9 h-9 bg-[#0D0618] border border-[#00F5D4]/60 text-[#00F5D4] font-bold hover:bg-[#00F5D4]/15"
-                  >
-                    +
-                  </button>
                 </div>
               </div>
             </div>
@@ -913,23 +998,37 @@ export function App() {
               )}
 
               <div className="flex items-center gap-3">
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-1">
                   <button
                     type="button"
-                    onClick={() => setTargetWpm((w) => Math.max(100, w - 20))}
-                    className="px-2 py-0.5 bg-[#0D0618] border border-[#00F5D4]/40 text-[#00F5D4] cursor-pointer"
+                    onClick={() => setTargetWpm((w) => Math.max(60, w - 10))}
+                    className="px-1.5 py-0.5 bg-[#0D0618] border border-[#00F5D4]/40 text-[#00F5D4] cursor-pointer hover:bg-[#00F5D4]/15"
                   >
-                    -20
+                    -10
                   </button>
-                  <span className="text-[#00F5D4] font-bold min-w-[75px] text-center">
+                  <button
+                    type="button"
+                    onClick={() => setTargetWpm((w) => Math.max(60, w - 1))}
+                    className="px-1.5 py-0.5 bg-[#0D0618] border border-[#6C7A89]/40 text-[#F2F5F8] cursor-pointer hover:border-[#00F5D4]"
+                  >
+                    -1
+                  </button>
+                  <span className="text-[#00F5D4] font-bold min-w-[72px] text-center">
                     {activeWpm} WPM
                   </span>
                   <button
                     type="button"
-                    onClick={() => setTargetWpm((w) => Math.min(800, w + 20))}
-                    className="px-2 py-0.5 bg-[#0D0618] border border-[#00F5D4]/40 text-[#00F5D4] cursor-pointer"
+                    onClick={() => setTargetWpm((w) => Math.min(900, w + 1))}
+                    className="px-1.5 py-0.5 bg-[#0D0618] border border-[#6C7A89]/40 text-[#F2F5F8] cursor-pointer hover:border-[#00F5D4]"
                   >
-                    +20
+                    +1
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTargetWpm((w) => Math.min(900, w + 10))}
+                    className="px-1.5 py-0.5 bg-[#0D0618] border border-[#00F5D4]/40 text-[#00F5D4] cursor-pointer hover:bg-[#00F5D4]/15"
+                  >
+                    +10
                   </button>
                 </div>
 
