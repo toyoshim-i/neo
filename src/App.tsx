@@ -1709,8 +1709,8 @@ export function App() {
           MODAL 3: SYSTEM SETTINGS & LOCAL LLM (Secondary Hierarchy)
       ========================================================= */}
       {showSettingsModal && (
-        <div className="fixed inset-0 z-50 bg-[#0D0618]/85 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="max-w-md w-full">
+        <div className="fixed inset-0 z-50 bg-[#0D0618]/85 backdrop-blur-xs overflow-y-auto flex items-center justify-center p-4">
+          <div className="max-w-md w-full my-auto">
             <ChamferedPanel
               variant="magenta"
               cutSize={12}
@@ -1726,7 +1726,7 @@ export function App() {
                 </button>
               }
             >
-              <div className="p-5 space-y-4 font-terminal text-xs">
+              <div className="p-5 space-y-4 font-terminal text-xs max-h-[78vh] overflow-y-auto overscroll-contain">
                 {/* Toggle: Chunk Move Click */}
                 <div className="flex items-center justify-between py-2 border-b border-[#6C7A89]/20">
                   <div className="flex items-center gap-2">
