@@ -5,9 +5,9 @@ import { buildNormalizedPassage } from './chunker';
 export type LlmProviderType = 'webllm' | 'ollama' | 'rule_based';
 
 export type WebLlmModelId =
-  | 'gemma-2-2b-it-q4f16_1-MLC'
-  | 'gemma-4-E2B-it-q4f16_1-MLC'
-  | 'gemma3-1b-it-q4f16_1-MLC';
+  | 'gemma3-1b-it-q4f16_1-MLC'
+  | 'gemma-2-2b-it-q4f32_1-MLC-1k'
+  | 'gemma-4-E2B-it-q4f16_1-MLC';
 
 export const WEBLLM_MODEL_OPTIONS: Array<{
   id: WebLlmModelId;
@@ -16,22 +16,22 @@ export const WEBLLM_MODEL_OPTIONS: Array<{
   desc: string;
 }> = [
   {
-    id: 'gemma-2-2b-it-q4f16_1-MLC',
-    label: 'GEMMA 2 2B',
+    id: 'gemma3-1b-it-q4f16_1-MLC',
+    label: 'GEMMA 3 1B',
+    vram: '0.7 GB',
+    desc: 'Ultra-lightweight & fast (Recommended)',
+  },
+  {
+    id: 'gemma-2-2b-it-q4f32_1-MLC-1k',
+    label: 'GEMMA 2 2B (F32)',
     vram: '1.9 GB',
-    desc: 'Balanced speed & VRAM',
+    desc: 'FP32 compute (prevents mobile FP16 NaN)',
   },
   {
     id: 'gemma-4-E2B-it-q4f16_1-MLC',
     label: 'GEMMA 4 E2B',
     vram: '3.4 GB',
-    desc: 'Best quiz & chunk quality',
-  },
-  {
-    id: 'gemma3-1b-it-q4f16_1-MLC',
-    label: 'GEMMA 3 1B',
-    vram: '0.7 GB',
-    desc: 'Ultra-lightweight & fast',
+    desc: 'High-capacity desktop/tablet tier',
   },
 ];
 
@@ -49,7 +49,7 @@ export function getSavedWebLlmModel(): WebLlmModelId {
       return saved as WebLlmModelId;
     }
   }
-  return 'gemma-2-2b-it-q4f16_1-MLC';
+  return 'gemma3-1b-it-q4f16_1-MLC';
 }
 
 export function saveWebLlmModelSelection(modelId: WebLlmModelId): void {
@@ -113,9 +113,9 @@ export async function checkCachedWebLlmModels(): Promise<
   Record<WebLlmModelId, boolean>
 > {
   const result: Record<WebLlmModelId, boolean> = {
-    'gemma-2-2b-it-q4f16_1-MLC': false,
-    'gemma-4-E2B-it-q4f16_1-MLC': false,
     'gemma3-1b-it-q4f16_1-MLC': false,
+    'gemma-2-2b-it-q4f32_1-MLC-1k': false,
+    'gemma-4-E2B-it-q4f16_1-MLC': false,
   };
   try {
     const { hasModelInCache, prebuiltAppConfig } = await import(
@@ -157,6 +157,14 @@ export async function initWebLlmEngine(
   );
   const resolvedModelId = matchedRecord ? matchedRecord.model_id : modelId;
 
+  // Resolve WindowSizeConfigurationError in gemma3-1b-it-q4f16_1-MLC where upstream
+  // mlc-chat-config.json sets sliding_window_size: 512 while prebuiltAppConfig sets
+  // context_window_size: 4096 without resetting sliding_window_size to -1.
+  const chatOpts = {
+    context_window_size: 1024,
+    sliding_window_size: -1,
+  };
+
   if (
     globalState.engine &&
     globalState.loadedModelId?.toLowerCase() === resolvedModelId.toLowerCase()
@@ -168,17 +176,21 @@ export async function initWebLlmEngine(
     globalState.engine.setInitProgressCallback((report: InitProgressReport) => {
       onProgress?.(report.text, report.progress);
     });
-    await globalState.engine.reload(resolvedModelId);
+    await globalState.engine.reload(resolvedModelId, chatOpts);
     globalState.loadedModelId = resolvedModelId;
     return globalState.engine;
   }
 
-  const engine = await CreateMLCEngine(resolvedModelId, {
-    appConfig: prebuiltAppConfig,
-    initProgressCallback: (report: InitProgressReport) => {
-      onProgress?.(report.text, report.progress);
+  const engine = await CreateMLCEngine(
+    resolvedModelId,
+    {
+      appConfig: prebuiltAppConfig,
+      initProgressCallback: (report: InitProgressReport) => {
+        onProgress?.(report.text, report.progress);
+      },
     },
-  });
+    chatOpts
+  );
 
   globalState.engine = engine;
   globalState.loadedModelId = resolvedModelId;
