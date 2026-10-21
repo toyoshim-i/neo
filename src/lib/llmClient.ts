@@ -61,24 +61,12 @@ export function saveWebLlmModelSelection(modelId: WebLlmModelId): void {
 export const DEFAULT_WEBLLM_MODEL: WebLlmModelId = getSavedWebLlmModel();
 
 const SYSTEM_PROMPT = `You are a cognitive science reading-training data generator.
-Given an English passage, perform two tasks and output ONLY valid JSON matching the schema (no markdown fences, no commentary):
+Given an English passage, perform two tasks and output ONLY a single valid JSON object (double-quoted keys and strings, no thinking process, no markdown fences, no commentary):
 1. Split the passage into meaningful semantic chunks of 2 to 4 words each (keep prepositional phrases, noun phrases, and verb phrases intact). Perfectly preserve the original word order and punctuation.
 2. Create 3 multiple-choice comprehension questions (1 main idea, 2 specific details) with 4 options each to test whether the reader genuinely understood the passage at high speed.
 
-Output JSON Schema:
-{
-  "chunks": ["string"],
-  "discourseMarkerIndices": [0],
-  "questions": [
-    {
-      "code": "SYNAPSE-01",
-      "question": "string",
-      "options": ["string", "string", "string", "string"],
-      "correctIndex": 0,
-      "explanation": "string"
-    }
-  ]
-}`;
+Required JSON format:
+{"chunks":["chunk 1","chunk 2"],"discourseMarkerIndices":[0],"questions":[{"code":"SYNAPSE-01","question":"Question text?","options":["A","B","C","D"],"correctIndex":0,"explanation":"Brief reason."}]}`;
 
 // Persist engine singleton on globalThis so Vite HMR updates never drop VRAM state
 interface GlobalWebLlmState {
@@ -189,26 +177,153 @@ export async function initWebLlmEngine(
   return engine;
 }
 
-function parseLlmJsonOutput(rawContent: string): {
+function repairAndParseJson(candidate: string): Record<string, unknown> {
+  // 1. Try strict JSON.parse first
+  try {
+    return JSON.parse(candidate) as Record<string, unknown>;
+  } catch {
+    // Continue to relaxed JSON repair
+  }
+
+  let repaired = candidate.trim();
+
+  // Remove single-line // comments that aren't inside URLs (http:// or https://)
+  repaired = repaired.replace(/(^|[^:])\/\/.*$/gm, '$1');
+
+  // Quote unquoted object keys: { chunks: [...] } or , questions: [...]
+  repaired = repaired.replace(
+    /([{,]\s*)([A-Za-z_][A-Za-z0-9_]*)\s*:/g,
+    '$1"$2":'
+  );
+
+  // Convert single-quoted property names {'chunks': ...} to double-quoted {"chunks": ...}
+  repaired = repaired.replace(
+    /([{,]\s*)'([A-Za-z_][A-Za-z0-9_]*)'\s*:/g,
+    '$1"$2":'
+  );
+
+  // Convert single-quoted string values : 'value' or ['a', 'b'] when double quotes are absent
+  repaired = repaired.replace(
+    /([:[,]\s*)'([^'\\]*(?:\\.[^'\\]*)*)'(\s*[,}\]])/g,
+    (_m, prefix: string, inner: string, suffix: string) =>
+      `${prefix}"${inner.replace(/"/g, '\\"')}"${suffix}`
+  );
+
+  // Remove trailing commas before } or ]
+  repaired = repaired.replace(/,\s*([}\]])/g, '$1');
+
+  try {
+    return JSON.parse(repaired) as Record<string, unknown>;
+  } catch {
+    // 2. If truncated by max_tokens, attempt to close open brackets/braces
+    let balanced = repaired.replace(/,\s*$/, '');
+    const stack: string[] = [];
+    let inString = false;
+    let escaped = false;
+    for (let i = 0; i < balanced.length; i++) {
+      const ch = balanced[i];
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (ch === '\\') {
+        escaped = true;
+        continue;
+      }
+      if (ch === '"') {
+        inString = !inString;
+        continue;
+      }
+      if (inString) continue;
+      if (ch === '{') stack.push('}');
+      else if (ch === '[') stack.push(']');
+      else if (ch === '}' || ch === ']') stack.pop();
+    }
+    if (inString) balanced += '"';
+    while (stack.length > 0) {
+      balanced += stack.pop();
+    }
+    balanced = balanced.replace(/,\s*([}\]])/g, '$1');
+    return JSON.parse(balanced) as Record<string, unknown>;
+  }
+}
+
+export function parseLlmJsonOutput(rawContent: string): {
   chunks?: string[];
   discourseMarkerIndices?: number[];
   questions?: QuizQuestion[];
 } {
-  // Strip any thinking blocks (<think>...</think> or <|thought|>...<thought|>) and markdown fences
+  // 1. Strip thinking blocks (<think>...</think> or Gemma 4 <|thought|>...<|thought|>)
   let cleaned = rawContent
     .replace(/<think>[\s\S]*?<\/think>/gi, '')
-    .replace(/<\|thought\|>[\s\S]*?<thought\|>/gi, '')
-    .replace(/```(?:json)?/gi, '')
+    .replace(/<\|thought\|>[\s\S]*?(?:<\|thought\|>|<\/thought>|<thought\|>)/gi, '')
     .trim();
 
-  // Extract outermost JSON object {...}
-  const firstBrace = cleaned.indexOf('{');
-  const lastBrace = cleaned.lastIndexOf('}');
-  if (firstBrace !== -1 && lastBrace > firstBrace) {
-    cleaned = cleaned.slice(firstBrace, lastBrace + 1);
+  // 2. Collect candidate JSON substrings in priority order:
+  //    (a) Inside ```json ... ``` fenced block
+  //    (b) Starting at the `{` immediately preceding `"chunks"` or `"questions"`
+  //    (c) Outermost `{ ... }`
+  const candidates: string[] = [];
+
+  const fenceMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fenceMatch?.[1]) {
+    const fenced = fenceMatch[1].trim();
+    const fStart = fenced.indexOf('{');
+    const fEnd = fenced.lastIndexOf('}');
+    if (fStart !== -1 && fEnd > fStart) {
+      candidates.push(fenced.slice(fStart, fEnd + 1));
+    }
   }
 
-  const parsed = JSON.parse(cleaned);
+  const noFences = cleaned.replace(/```(?:json)?/gi, '').trim();
+
+  const schemaKeyMatch = noFences.match(
+    /\{\s*["']?(?:chunks|discourseMarkerIndices|questions)["']?\s*:/
+  );
+  if (schemaKeyMatch?.index !== undefined) {
+    const startIdx = schemaKeyMatch.index;
+    const endIdx = noFences.lastIndexOf('}');
+    if (endIdx > startIdx) {
+      candidates.push(noFences.slice(startIdx, endIdx + 1));
+    } else {
+      candidates.push(noFences.slice(startIdx));
+    }
+  }
+
+  const firstBrace = noFences.indexOf('{');
+  const lastBrace = noFences.lastIndexOf('}');
+  if (firstBrace !== -1 && lastBrace > firstBrace) {
+    candidates.push(noFences.slice(firstBrace, lastBrace + 1));
+  } else if (firstBrace !== -1) {
+    candidates.push(noFences.slice(firstBrace));
+  }
+
+  let parsed: Record<string, unknown> | null = null;
+  let lastError: unknown = null;
+
+  for (const cand of candidates) {
+    try {
+      const obj = repairAndParseJson(cand);
+      if (
+        obj &&
+        typeof obj === 'object' &&
+        (Array.isArray(obj.chunks) || Array.isArray(obj.questions))
+      ) {
+        parsed = obj;
+        break;
+      }
+    } catch (err) {
+      lastError = err;
+    }
+  }
+
+  if (!parsed) {
+    const preview = rawContent.replace(/\s+/g, ' ').trim().slice(0, 140);
+    const errMsg =
+      lastError instanceof Error ? lastError.message : 'Invalid JSON output';
+    throw new Error(`${errMsg} | Raw output: "${preview}"`);
+  }
+
   const questions: QuizQuestion[] | undefined = Array.isArray(parsed.questions)
     ? parsed.questions
         .slice(0, 3)
@@ -345,7 +460,7 @@ export async function processPassageWithOptionalLlm(params: {
       const reply = await engine.chat.completions.create({
         messages: [{ role: 'user', content: combinedPrompt }],
         temperature: 0.2,
-        max_tokens: 1024,
+        max_tokens: 2048,
       });
 
       const content = reply.choices?.[0]?.message?.content || '';
