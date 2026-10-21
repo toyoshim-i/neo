@@ -63,6 +63,7 @@ import {
   checkCachedWebLlmModels,
   saveWebLlmModelSelection,
 } from './lib/llmClient';
+import { buildNormalizedPassage } from './lib/chunker';
 
 type ScreenState = 'home' | 'reading' | 'quiz' | 'result';
 type PassageModalTab = 'presets' | 'live' | 'custom';
@@ -153,6 +154,11 @@ export function App() {
   const [feedStatusMsg, setFeedStatusMsg] = useState<string>('');
   const [customTitle, setCustomTitle] = useState<string>('');
   const [customRawText, setCustomRawText] = useState<string>('');
+  const [bgQuizStatus, setBgQuizStatus] = useState<{
+    passageId: string;
+    state: 'running' | 'ready' | 'fallback';
+    detail?: string;
+  } | null>(null);
 
   // Active Reading Session State
   const [activeChunkIndex, setActiveChunkIndex] = useState<number>(0);
@@ -508,7 +514,61 @@ export function App() {
     return () => window.removeEventListener('keydown', onKey);
   }, [screen, selectedOption, handleSelectQuizOption, handleNextQuizStep]);
 
-  // Live Feed Handler (Wikipedia / Dev.to)
+  // Non-blocking background LLM quiz synthesis (runs while user reads rule-chunked passage)
+  const upgradePassageQuizInBackground = useCallback(
+    (basePassage: TrainingPassage) => {
+      if (llmProvider === 'rule_based') return;
+      setBgQuizStatus({
+        passageId: basePassage.id,
+        state: 'running',
+        detail: 'SYNTHESIZING AI QUIZ...',
+      });
+
+      void processPassageWithOptionalLlm({
+        title: basePassage.title,
+        rawText: basePassage.rawText,
+        category: basePassage.category,
+        sourceType: basePassage.sourceType,
+        provider: llmProvider,
+        webLlmModel: selectedWebLlmModel,
+        llmEndpoint: profile.llmEndpoint,
+        llmModel: profile.llmModel,
+      }).then(async ({ passage: upgraded, usedProvider }) => {
+        if (isWebLlmReady(selectedWebLlmModel)) {
+          setWebLlmStatus('READY IN VRAM');
+        }
+        if (usedProvider !== 'rule_based') {
+          const merged: TrainingPassage = {
+            ...basePassage,
+            questions: upgraded.questions,
+          };
+          await db.customPassages.put(merged);
+          setCustomPassages((prev) =>
+            prev.map((p) => (p.id === basePassage.id ? merged : p))
+          );
+          setBgQuizStatus({
+            passageId: basePassage.id,
+            state: 'ready',
+            detail: `AI QUIZ READY (${usedProvider.toUpperCase()})`,
+          });
+        } else {
+          setBgQuizStatus({
+            passageId: basePassage.id,
+            state: 'fallback',
+            detail: 'RULE QUIZ ACTIVE',
+          });
+        }
+      });
+    },
+    [
+      llmProvider,
+      selectedWebLlmModel,
+      profile.llmEndpoint,
+      profile.llmModel,
+    ]
+  );
+
+  // Live Feed Handler (Wikipedia / Dev.to) — Instant rule chunking + Background LLM Quiz
   const handleFetchLivePassage = async (source: 'wikipedia' | 'devto') => {
     setIsFetchingFeed(true);
     setFeedStatusMsg(
@@ -522,25 +582,23 @@ export function App() {
           ? await fetchWikipediaPassage()
           : await fetchDevToPassage();
 
-      const { passage } = await processPassageWithOptionalLlm({
+      // 1. Instant (<2ms) rule-based syntactic chunking so reading can start immediately
+      const instantPassage = buildNormalizedPassage({
         title: raw.title,
         rawText: raw.rawText,
         category: raw.category,
         sourceType: source,
-        provider: llmProvider,
-        webLlmModel: selectedWebLlmModel,
-        llmEndpoint: profile.llmEndpoint,
-        llmModel: profile.llmModel,
-        onProgress: (msg) => setFeedStatusMsg(msg),
       });
-      if (isWebLlmReady(selectedWebLlmModel)) setWebLlmStatus('READY IN VRAM');
 
-      await db.customPassages.put(passage);
-      setCustomPassages((prev) => [passage, ...prev]);
-      setSelectedPassageId(passage.id);
+      await db.customPassages.put(instantPassage);
+      setCustomPassages((prev) => [instantPassage, ...prev]);
+      setSelectedPassageId(instantPassage.id);
       setFeedStatusMsg('');
       setShowPassageModal(false);
       soundEngine.playQuizCorrect(false);
+
+      // 2. Non-blocking background LLM quiz synthesis while the user prepares or reads
+      upgradePassageQuizInBackground(instantPassage);
     } catch (err) {
       setFeedStatusMsg(
         `Fetch failed: ${err instanceof Error ? err.message : 'Network error'}`
@@ -550,36 +608,31 @@ export function App() {
     }
   };
 
-  // Custom Text Handler
+  // Custom Text Handler — Instant rule chunking + Background LLM Quiz
   const handleCreateCustomPassage = async () => {
     if (customRawText.trim().split(/\s+/).length < 25) {
       setFeedStatusMsg('Please paste at least 25 words of English text.');
       return;
     }
     setIsFetchingFeed(true);
-    setFeedStatusMsg('Processing semantic chunks & comprehension cards...');
     try {
-      const { passage } = await processPassageWithOptionalLlm({
+      const instantPassage = buildNormalizedPassage({
         title: customTitle.trim() || 'Custom Neural Transmission',
         rawText: customRawText.trim(),
         category: 'CUSTOM',
         sourceType: 'custom',
-        provider: llmProvider,
-        webLlmModel: selectedWebLlmModel,
-        llmEndpoint: profile.llmEndpoint,
-        llmModel: profile.llmModel,
-        onProgress: (msg) => setFeedStatusMsg(msg),
       });
-      if (isWebLlmReady(selectedWebLlmModel)) setWebLlmStatus('READY IN VRAM');
 
-      await db.customPassages.put(passage);
-      setCustomPassages((prev) => [passage, ...prev]);
-      setSelectedPassageId(passage.id);
+      await db.customPassages.put(instantPassage);
+      setCustomPassages((prev) => [instantPassage, ...prev]);
+      setSelectedPassageId(instantPassage.id);
       setCustomTitle('');
       setCustomRawText('');
       setFeedStatusMsg('');
       setShowPassageModal(false);
       soundEngine.playQuizCorrect(false);
+
+      upgradePassageQuizInBackground(instantPassage);
     } finally {
       setIsFetchingFeed(false);
     }
@@ -754,13 +807,29 @@ export function App() {
           >
             <div className="p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div className="space-y-1.5">
-                <div className="flex items-center gap-2 font-terminal text-xs">
+                <div className="flex flex-wrap items-center gap-2 font-terminal text-xs">
                   <span className="px-2 py-0.5 bg-[#00F5D4]/15 border border-[#00F5D4]/50 text-[#00F5D4] font-bold">
                     {selectedPassage.category}
                   </span>
                   <span className="text-[#6C7A89]">
                     {selectedPassage.wordCount} words // ~{estimatedSeconds}s
                   </span>
+                  {bgQuizStatus?.passageId === selectedPassage.id && (
+                    <span
+                      className={`px-2 py-0.5 text-[10px] border flex items-center gap-1 ${
+                        bgQuizStatus.state === 'running'
+                          ? 'border-[#FFE600]/60 text-[#FFE600] bg-[#FFE600]/10'
+                          : bgQuizStatus.state === 'ready'
+                          ? 'border-[#00F5D4]/60 text-[#00F5D4] bg-[#00F5D4]/10'
+                          : 'border-[#6C7A89]/50 text-[#6C7A89]'
+                      }`}
+                    >
+                      {bgQuizStatus.state === 'running' && (
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                      )}
+                      <span>{bgQuizStatus.detail}</span>
+                    </span>
+                  )}
                 </div>
                 <h2 className="text-base sm:text-lg font-bold text-[#F2F5F8]">
                   {selectedPassage.title}

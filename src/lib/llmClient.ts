@@ -60,13 +60,21 @@ export function saveWebLlmModelSelection(modelId: WebLlmModelId): void {
 
 export const DEFAULT_WEBLLM_MODEL: WebLlmModelId = getSavedWebLlmModel();
 
-const SYSTEM_PROMPT = `You are a cognitive science reading-training data generator.
-Given an English passage, perform two tasks and output ONLY a single valid JSON object (double-quoted keys and strings, no thinking process, no markdown fences, no commentary):
-1. Split the passage into meaningful semantic chunks of 2 to 4 words each (keep prepositional phrases, noun phrases, and verb phrases intact). Perfectly preserve the original word order and punctuation.
-2. Create 3 multiple-choice comprehension questions (1 main idea, 2 specific details) with 4 options each to test whether the reader genuinely understood the passage at high speed.
+// Hybrid Rule + LLM Architecture:
+// - Semantic chunking & discourse marker detection are handled deterministically in <1ms by `chunker.ts`
+//   (avoiding 400-600 wasted output tokens of the LLM repeating the passage word-for-word).
+// - The on-device LLM focuses exclusively on generating 3 compact anti-skimming comprehension questions.
+const SYSTEM_PROMPT = `Generate 3 multiple-choice reading comprehension questions (1 main idea, 2 specific details) for the passage below.
+Output ONLY valid JSON with double-quoted keys (no markdown fences, no commentary, keep options under 8 words):
+{"questions":[{"q":"Question?","o":["Option A","Option B","Option C","Option D"],"a":0,"e":"Short reason."}]}`;
 
-Required JSON format:
-{"chunks":["chunk 1","chunk 2"],"discourseMarkerIndices":[0],"questions":[{"code":"SYNAPSE-01","question":"Question text?","options":["A","B","C","D"],"correctIndex":0,"explanation":"Brief reason."}]}`;
+const MAX_LLM_INPUT_WORDS = 180;
+
+function truncatePassageForLlm(rawText: string): string {
+  const words = rawText.trim().split(/\s+/);
+  if (words.length <= MAX_LLM_INPUT_WORDS) return rawText.trim();
+  return words.slice(0, MAX_LLM_INPUT_WORDS).join(' ') + '...';
+}
 
 // Persist engine singleton on globalThis so Vite HMR updates never drop VRAM state
 interface GlobalWebLlmState {
@@ -327,24 +335,27 @@ export function parseLlmJsonOutput(rawContent: string): {
   const questions: QuizQuestion[] | undefined = Array.isArray(parsed.questions)
     ? parsed.questions
         .slice(0, 3)
-        .map((q: Record<string, unknown>, i: number) => ({
-          id: `q-llm-${Date.now()}-${i}`,
-          code: String(q.code || `SYNAPSE-0${i + 1}`),
-          question: String(q.question || ''),
-          options: (Array.isArray(q.options) && q.options.length === 4
-            ? q.options.map(String)
-            : ['Option A', 'Option B', 'Option C', 'Option D']) as [
-            string,
-            string,
-            string,
-            string,
-          ],
-          correctIndex: Math.max(
-            0,
-            Math.min(3, Number(q.correctIndex ?? 0) || 0)
-          ),
-          explanation: String(q.explanation || ''),
-        }))
+        .map((q: Record<string, unknown>, i: number) => {
+          const rawOpts = Array.isArray(q.o)
+            ? q.o
+            : Array.isArray(q.options)
+            ? q.options
+            : null;
+          const options = (
+            rawOpts && rawOpts.length >= 4
+              ? rawOpts.slice(0, 4).map(String)
+              : ['Option A', 'Option B', 'Option C', 'Option D']
+          ) as [string, string, string, string];
+          const rawAns = q.a ?? q.correctIndex ?? 0;
+          return {
+            id: `q-llm-${Date.now()}-${i}`,
+            code: String(q.code || `SYNAPSE-0${i + 1}`),
+            question: String(q.q || q.question || ''),
+            options,
+            correctIndex: Math.max(0, Math.min(3, Number(rawAns) || 0)),
+            explanation: String(q.e || q.explanation || ''),
+          };
+        })
     : undefined;
 
   return {
@@ -454,13 +465,14 @@ export async function processPassageWithOptionalLlm(params: {
         `Running on-device WebGPU inference (${modelId})...`
       );
 
-      // Combine system & user prompt into a single user turn for maximum Gemma 2/3/4 template compatibility
-      const combinedPrompt = `${SYSTEM_PROMPT}\n\nPassage:\n${params.rawText}`;
+      // Combine system & user prompt into a single user turn; cap input words and output tokens for fast mobile inference
+      const compactInput = truncatePassageForLlm(params.rawText);
+      const combinedPrompt = `${SYSTEM_PROMPT}\n\nPassage:\n${compactInput}`;
 
       const reply = await engine.chat.completions.create({
         messages: [{ role: 'user', content: combinedPrompt }],
         temperature: 0.2,
-        max_tokens: 2048,
+        max_tokens: 384,
       });
 
       const content = reply.choices?.[0]?.message?.content || '';
