@@ -64,9 +64,20 @@ export const DEFAULT_WEBLLM_MODEL: WebLlmModelId = getSavedWebLlmModel();
 // - Semantic chunking & discourse marker detection are handled deterministically in <1ms by `chunker.ts`
 //   (avoiding 400-600 wasted output tokens of the LLM repeating the passage word-for-word).
 // - The on-device LLM focuses exclusively on generating 3 compact anti-skimming comprehension questions.
-const SYSTEM_PROMPT = `Generate 3 multiple-choice reading comprehension questions (1 main idea, 2 specific details) for the passage below.
-Output ONLY valid JSON with double-quoted keys (no markdown fences, no commentary, keep options under 8 words):
-{"questions":[{"q":"Question?","o":["Option A","Option B","Option C","Option D"],"a":0,"e":"Short reason."}]}`;
+function buildQuizGenerationPrompt(passageText: string): string {
+  const compactInput = truncatePassageForLlm(passageText);
+  return `Read the passage below and write 3 multiple-choice comprehension questions about its specific facts and main idea.
+Each question must have 4 short answer choices in an array, the 0-based index of the correct choice, and a short explanation.
+Output ONLY valid JSON (no markdown fences, no commentary).
+
+Example format for a passage about CPU caches:
+{"questions":[{"question":"Why do processors use L1 cache?","options":["To reduce memory access latency","To cool the silicon die","To replace disk storage","To slow down clock speed"],"correctIndex":0,"explanation":"L1 cache stores frequently used data close to the core."},{"question":"What happens on a cache miss?","options":["The CPU fetches data from slower main RAM","The system shuts down immediately","The clock multiplier doubles","Registers are erased"],"correctIndex":0,"explanation":"A miss requires fetching from lower memory tiers."}]}
+
+Passage to quiz:
+"${compactInput}"
+
+JSON output for the passage above:`;
+}
 
 const MAX_LLM_INPUT_WORDS = 180;
 
@@ -362,31 +373,64 @@ export function parseLlmJsonOutput(rawContent: string): {
     throw new Error(`${errMsg} | Raw output: "${preview}"`);
   }
 
-  const questions: QuizQuestion[] | undefined = Array.isArray(parsed.questions)
+  const rawQuestions = Array.isArray(parsed.questions)
     ? parsed.questions
-        .slice(0, 3)
-        .map((q: Record<string, unknown>, i: number) => {
-          const rawOpts = Array.isArray(q.o)
-            ? q.o
-            : Array.isArray(q.options)
-            ? q.options
-            : null;
-          const options = (
-            rawOpts && rawOpts.length >= 4
-              ? rawOpts.slice(0, 4).map(String)
-              : ['Option A', 'Option B', 'Option C', 'Option D']
-          ) as [string, string, string, string];
-          const rawAns = q.a ?? q.correctIndex ?? 0;
-          return {
-            id: `q-llm-${Date.now()}-${i}`,
-            code: String(q.code || `SYNAPSE-0${i + 1}`),
-            question: String(q.q || q.question || ''),
-            options,
-            correctIndex: Math.max(0, Math.min(3, Number(rawAns) || 0)),
-            explanation: String(q.e || q.explanation || ''),
-          };
-        })
-    : undefined;
+    : [];
+
+  const validQuestions: QuizQuestion[] = [];
+  for (let i = 0; i < rawQuestions.length && validQuestions.length < 3; i++) {
+    const q = rawQuestions[i] as Record<string, unknown>;
+    if (!q || typeof q !== 'object') continue;
+
+    const qText = String(q.question || q.q || '').trim();
+    const rawOpts = Array.isArray(q.options)
+      ? q.options
+      : Array.isArray(q.o)
+      ? q.o
+      : Array.isArray(q.choices)
+      ? q.choices
+      : null;
+
+    if (
+      !qText ||
+      qText.length < 8 ||
+      /^question\??$/i.test(qText) ||
+      !rawOpts ||
+      rawOpts.length < 4
+    ) {
+      continue;
+    }
+
+    const options = rawOpts.slice(0, 4).map((o) => String(o).trim()) as [
+      string,
+      string,
+      string,
+      string,
+    ];
+    if (options.some((o) => !o || /^option [a-d1-4]$/i.test(o))) {
+      continue;
+    }
+
+    const rawAns = q.correctIndex ?? q.a ?? q.answer ?? 0;
+    validQuestions.push({
+      id: `q-llm-${Date.now()}-${validQuestions.length}`,
+      code: String(q.code || `SYNAPSE-0${validQuestions.length + 1}`),
+      question: qText,
+      options,
+      correctIndex: Math.max(0, Math.min(3, Number(rawAns) || 0)),
+      explanation: String(q.explanation || q.e || '').trim(),
+    });
+  }
+
+  if (validQuestions.length === 0 && !Array.isArray(parsed.chunks)) {
+    const preview = rawContent.replace(/\s+/g, ' ').trim().slice(0, 140);
+    throw new Error(
+      `LLM output did not contain valid 4-option questions | Raw output: "${preview}"`
+    );
+  }
+
+  const questions: QuizQuestion[] | undefined =
+    validQuestions.length > 0 ? validQuestions : undefined;
 
   return {
     chunks: Array.isArray(parsed.chunks)
@@ -495,14 +539,13 @@ export async function processPassageWithOptionalLlm(params: {
         `Running on-device WebGPU inference (${modelId})...`
       );
 
-      // Combine system & user prompt into a single user turn; cap input words and output tokens for fast mobile inference
-      const compactInput = truncatePassageForLlm(params.rawText);
-      const combinedPrompt = `${SYSTEM_PROMPT}\n\nPassage:\n${compactInput}`;
+      // Combine Concrete 1-shot example + passage into a single user turn
+      const combinedPrompt = buildQuizGenerationPrompt(params.rawText);
 
       const reply = await engine.chat.completions.create({
         messages: [{ role: 'user', content: combinedPrompt }],
         temperature: 0.2,
-        max_tokens: 384,
+        max_tokens: 420,
       });
 
       const content = reply.choices?.[0]?.message?.content || '';
@@ -543,18 +586,16 @@ export async function processPassageWithOptionalLlm(params: {
       const controller = new AbortController();
       const timeout = window.setTimeout(() => controller.abort(), 18000);
 
+      const promptText = buildQuizGenerationPrompt(params.rawText);
       const body = isOpenAiCompat
         ? JSON.stringify({
             model: params.llmModel || 'gemma2:2b',
-            messages: [
-              { role: 'system', content: SYSTEM_PROMPT },
-              { role: 'user', content: params.rawText },
-            ],
+            messages: [{ role: 'user', content: promptText }],
             temperature: 0.2,
           })
         : JSON.stringify({
             model: params.llmModel || 'gemma2:2b',
-            prompt: `${SYSTEM_PROMPT}\n\nPassage:\n${params.rawText}`,
+            prompt: promptText,
             format: 'json',
             stream: false,
           });
