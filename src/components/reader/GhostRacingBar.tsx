@@ -38,11 +38,15 @@ export const GhostRacingBar: React.FC<GhostRacingBarProps> = ({
   }, [isPlaying]);
 
   const humanAvgTotalMs = Math.max(1000, (totalWords / 238) * 60000);
-  const selfBestWpm = Math.max(150, bestEffectiveWpm || 260);
-  const selfBestTotalMs = Math.max(1000, (totalWords / selfBestWpm) * 60000);
+  const hasPersonalBest = bestEffectiveWpm > 0;
+  const selfBestTotalMs = hasPersonalBest
+    ? Math.max(1000, (totalWords / bestEffectiveWpm) * 60000)
+    : Infinity;
 
   const avgProgress = Math.min(100, (elapsedMs / humanAvgTotalMs) * 100);
-  const bestProgress = Math.min(100, (elapsedMs / selfBestTotalMs) * 100);
+  const bestProgress = hasPersonalBest
+    ? Math.min(100, (elapsedMs / selfBestTotalMs) * 100)
+    : 0;
 
   // Check overtake events after first 8% of passage
   useEffect(() => {
@@ -56,14 +60,16 @@ export const GhostRacingBar: React.FC<GhostRacingBarProps> = ({
     }
     wasAheadOfAvg.current = nowAheadAvg;
 
-    const nowAheadBest = userProgress > bestProgress;
-    if (nowAheadBest && !wasAheadOfBest.current && bestProgress > 5) {
-      soundEngine.playOvertakeSpark();
-      setOvertakeFlash('BEST');
-      window.setTimeout(() => setOvertakeFlash(null), 650);
+    if (hasPersonalBest) {
+      const nowAheadBest = userProgress > bestProgress;
+      if (nowAheadBest && !wasAheadOfBest.current && bestProgress > 5) {
+        soundEngine.playOvertakeSpark();
+        setOvertakeFlash('BEST');
+        window.setTimeout(() => setOvertakeFlash(null), 650);
+      }
+      wasAheadOfBest.current = nowAheadBest;
     }
-    wasAheadOfBest.current = nowAheadBest;
-  }, [userProgress, avgProgress, bestProgress, elapsedMs]);
+  }, [userProgress, avgProgress, bestProgress, elapsedMs, hasPersonalBest]);
 
   return (
     <div
@@ -106,7 +112,7 @@ export const GhostRacingBar: React.FC<GhostRacingBarProps> = ({
       {/* Track 3: SELF BEST (MAGENTA) */}
       <div className="flex items-center gap-2">
         <span className="w-20 text-[#FF1E7A] shrink-0">
-          BEST ({selfBestWpm})
+          {hasPersonalBest ? `BEST (${bestEffectiveWpm})` : 'BEST (---)'}
         </span>
         <div className="flex-1 h-1 bg-[#0D0618] overflow-hidden">
           <div
@@ -115,7 +121,7 @@ export const GhostRacingBar: React.FC<GhostRacingBarProps> = ({
           />
         </div>
         <span className="w-9 text-right text-[#FF1E7A]">
-          {Math.round(bestProgress)}%
+          {hasPersonalBest ? `${Math.round(bestProgress)}%` : '--'}
         </span>
       </div>
     </div>

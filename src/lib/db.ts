@@ -18,10 +18,35 @@ class WetwareDatabase extends Dexie {
 
 export const db = new WetwareDatabase();
 
+export const INITIAL_DEFAULT_WPM = 150;
+export const QUIZ_PASS_THRESHOLD = 0.66; // >= 2/3 correct answers required to pass quiz & update personal best
+const LAST_WPM_STORAGE_KEY = 'wetware_last_target_wpm';
+
+export function getSavedTargetWpm(): number {
+  if (typeof window !== 'undefined') {
+    const raw = window.localStorage.getItem(LAST_WPM_STORAGE_KEY);
+    const parsed = raw ? Number(raw) : NaN;
+    if (Number.isFinite(parsed) && parsed >= 100 && parsed <= 900) {
+      return Math.round(parsed);
+    }
+  }
+  return INITIAL_DEFAULT_WPM;
+}
+
+export function saveTargetWpmPreference(wpm: number): void {
+  const clamped = Math.max(100, Math.min(900, Math.round(wpm)));
+  if (typeof window !== 'undefined') {
+    window.localStorage.setItem(LAST_WPM_STORAGE_KEY, String(clamped));
+  }
+  void db.profiles.update('default', { currentTargetWpm: clamped }).catch(() => {
+    // Ignore if profile row not created yet
+  });
+}
+
 export const DEFAULT_PROFILE: UserProfile = {
   id: 'default',
-  currentTargetWpm: 260,
-  bestEffectiveWpm: 260,
+  currentTargetWpm: getSavedTargetWpm(),
+  bestEffectiveWpm: 0,
   totalWordsRead: 0,
   streakDays: 1,
   lastActiveDate: new Date().toISOString().slice(0, 10),
@@ -30,8 +55,42 @@ export const DEFAULT_PROFILE: UserProfile = {
 };
 
 export async function getOrInitProfile(): Promise<UserProfile> {
-  const existing = await db.profiles.get('default');
-  if (existing) return existing;
+  const [existing, allSessions] = await Promise.all([
+    db.profiles.get('default'),
+    db.sessions.toArray(),
+  ]);
+
+  // Recompute true personal best strictly from quiz-passed sessions (syncRate >= 0.66)
+  const verifiedBest = allSessions
+    .filter((s) => s.syncRate >= QUIZ_PASS_THRESHOLD)
+    .reduce((max, s) => Math.max(max, s.effectiveWpm), 0);
+
+  if (existing) {
+    const savedWpm =
+      typeof window !== 'undefined'
+        ? window.localStorage.getItem(LAST_WPM_STORAGE_KEY)
+        : null;
+    const migratedTargetWpm = savedWpm
+      ? getSavedTargetWpm()
+      : existing.totalWordsRead === 0 && existing.currentTargetWpm === 260
+      ? INITIAL_DEFAULT_WPM
+      : existing.currentTargetWpm || INITIAL_DEFAULT_WPM;
+
+    const normalized: UserProfile = {
+      ...existing,
+      currentTargetWpm: migratedTargetWpm,
+      bestEffectiveWpm: verifiedBest,
+    };
+    await db.profiles.put(normalized);
+    if (typeof window !== 'undefined' && !savedWpm) {
+      window.localStorage.setItem(
+        LAST_WPM_STORAGE_KEY,
+        String(migratedTargetWpm)
+      );
+    }
+    return normalized;
+  }
+
   await db.profiles.put(DEFAULT_PROFILE);
   return DEFAULT_PROFILE;
 }
@@ -39,16 +98,19 @@ export async function getOrInitProfile(): Promise<UserProfile> {
 export async function recordSessionAndUpdateProfile(
   session: SessionLog,
   wordsRead: number,
-  nextTargetWpm: number
+  selectedTargetWpm: number
 ): Promise<UserProfile> {
   await db.sessions.put(session);
   const profile = await getOrInitProfile();
   const today = new Date().toISOString().slice(0, 10);
+  const quizPassed = session.syncRate >= QUIZ_PASS_THRESHOLD;
 
   const updated: UserProfile = {
     ...profile,
-    currentTargetWpm: nextTargetWpm,
-    bestEffectiveWpm: Math.max(profile.bestEffectiveWpm, session.effectiveWpm),
+    currentTargetWpm: selectedTargetWpm,
+    bestEffectiveWpm: quizPassed
+      ? Math.max(profile.bestEffectiveWpm, session.effectiveWpm)
+      : profile.bestEffectiveWpm,
     totalWordsRead: profile.totalWordsRead + wordsRead,
     lastActiveDate: today,
   };

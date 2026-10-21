@@ -44,6 +44,10 @@ import {
 import {
   db,
   DEFAULT_PROFILE,
+  INITIAL_DEFAULT_WPM,
+  QUIZ_PASS_THRESHOLD,
+  getSavedTargetWpm,
+  saveTargetWpmPreference,
   getOrInitProfile,
   recordSessionAndUpdateProfile,
   exportDatabaseJson,
@@ -143,7 +147,7 @@ export function App() {
   );
   const [isPreloadingWebLlm, setIsPreloadingWebLlm] = useState<boolean>(false);
 
-  const [targetWpm, setTargetWpm] = useState<number>(260);
+  const [targetWpm, setTargetWpm] = useState<number>(getSavedTargetWpm());
   const [selectedMode, setSelectedMode] = useState<TrainingMode>('chunk_pacer');
   const [selectedPassageId, setSelectedPassageId] = useState<string>(
     PRESET_PASSAGES[0].id
@@ -181,6 +185,12 @@ export function App() {
   // Final Session Metrics for Result Screen
   const [lastSessionMetrics, setLastSessionMetrics] =
     useState<FiveAxisMetrics | null>(null);
+  const [isNewPersonalBest, setIsNewPersonalBest] = useState<boolean>(false);
+
+  // Persist user-selected target WPM as the default for subsequent sessions
+  useEffect(() => {
+    saveTargetWpmPreference(targetWpm);
+  }, [targetWpm]);
 
   // Load IndexedDB on mount
   const reloadFromDb = useCallback(async () => {
@@ -191,7 +201,7 @@ export function App() {
         db.sessions.orderBy('timestamp').reverse().limit(30).toArray(),
       ]);
       setProfile(prof);
-      setTargetWpm(prof.currentTargetWpm || 260);
+      setTargetWpm(prof.currentTargetWpm || INITIAL_DEFAULT_WPM);
       setCustomPassages(savedPassages);
       setSessionHistory(logs);
     } catch {
@@ -313,11 +323,10 @@ export function App() {
       };
       setLastSessionMetrics(metrics);
 
-      const { nextWpm } = computeNextTargetWpm(
-        targetWpm,
-        syncRate,
-        forwardFlowRate
-      );
+      const quizPassed = syncRate >= QUIZ_PASS_THRESHOLD;
+      const previousBest = profile.bestEffectiveWpm;
+      const beatBest = quizPassed && effectiveWpm > previousBest;
+      setIsNewPersonalBest(beatBest);
 
       const log: SessionLog = {
         id: `sess-${Date.now()}`,
@@ -337,7 +346,7 @@ export function App() {
         const updatedProf = await recordSessionAndUpdateProfile(
           log,
           selectedPassage.wordCount,
-          nextWpm
+          targetWpm
         );
         setProfile(updatedProf);
         setSessionHistory((prev) => [log, ...prev.slice(0, 29)]);
@@ -348,7 +357,14 @@ export function App() {
       soundEngine.playRankConfirm();
       setScreen('result');
     },
-    [targetWpm, selectedPassage, totalSteps, regressionCount, selectedMode]
+    [
+      targetWpm,
+      selectedPassage,
+      totalSteps,
+      regressionCount,
+      selectedMode,
+      profile.bestEffectiveWpm,
+    ]
   );
 
   // Auto-advance timer during Reading Screen (for non-tachistoscope modes)
@@ -1187,6 +1203,22 @@ export function App() {
                           </div>
                           <div className="font-terminal text-xs text-[#FFE600] mt-1.5">
                             TOP {benchmark.topPercentile}% OF HUMAN READERS
+                          </div>
+                          <div className="font-terminal text-[11px] mt-2 pt-2 border-t border-[#6C7A89]/30">
+                            {isNewPersonalBest ? (
+                              <span className="text-[#00F5D4] font-bold">
+                                ★ NEW PERSONAL BEST! ({profile.bestEffectiveWpm} eWPM)
+                              </span>
+                            ) : lastSessionMetrics.syncRate >=
+                              QUIZ_PASS_THRESHOLD ? (
+                              <span className="text-[#6C7A89]">
+                                QUIZ PASSED // BEST: {profile.bestEffectiveWpm} eWPM
+                              </span>
+                            ) : (
+                              <span className="text-[#FF1E7A]">
+                                QUIZ FAILED (&lt;67%) // RECORD NOT UPDATED
+                              </span>
+                            )}
                           </div>
                         </div>
 
