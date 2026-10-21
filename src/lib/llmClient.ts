@@ -7,7 +7,7 @@ export type LlmProviderType = 'webllm' | 'ollama' | 'rule_based';
 export type WebLlmModelId =
   | 'gemma3-1b-it-q4f16_1-MLC'
   | 'gemma-2-2b-it-q4f32_1-MLC-1k'
-  | 'gemma-4-E2B-it-q4f16_1-MLC';
+  | 'gemma-4-E2B-it-q4f32_1-MLC';
 
 export const WEBLLM_MODEL_OPTIONS: Array<{
   id: WebLlmModelId;
@@ -19,19 +19,19 @@ export const WEBLLM_MODEL_OPTIONS: Array<{
     id: 'gemma3-1b-it-q4f16_1-MLC',
     label: 'GEMMA 3 1B',
     vram: '0.7 GB',
-    desc: 'Ultra-lightweight & fast (Recommended)',
+    desc: 'Ultra-lightweight (Sliding Window 512)',
   },
   {
     id: 'gemma-2-2b-it-q4f32_1-MLC-1k',
     label: 'GEMMA 2 2B (F32)',
     vram: '1.9 GB',
-    desc: 'FP32 compute (prevents mobile FP16 NaN)',
+    desc: 'FP32 compute (Safe on mobile GPUs)',
   },
   {
-    id: 'gemma-4-E2B-it-q4f16_1-MLC',
-    label: 'GEMMA 4 E2B',
-    vram: '3.4 GB',
-    desc: 'High-capacity desktop/tablet tier',
+    id: 'gemma-4-E2B-it-q4f32_1-MLC',
+    label: 'GEMMA 4 E2B (F32)',
+    vram: '3.8 GB',
+    desc: 'FP32 high-capacity tier',
   },
 ];
 
@@ -77,17 +77,27 @@ function truncatePassageForLlm(rawText: string): string {
 }
 
 // Persist engine singleton on globalThis so Vite HMR updates never drop VRAM state
+const ENGINE_CONFIG_VERSION = 3;
+
 interface GlobalWebLlmState {
   engine: MLCEngineInterface | null;
   loadedModelId: string | null;
+  configVersion?: number;
 }
 
 const globalState: GlobalWebLlmState = (() => {
   const g = globalThis as unknown as {
     __WETWARE_WEBLLM__?: GlobalWebLlmState;
   };
-  if (!g.__WETWARE_WEBLLM__) {
-    g.__WETWARE_WEBLLM__ = { engine: null, loadedModelId: null };
+  if (
+    !g.__WETWARE_WEBLLM__ ||
+    g.__WETWARE_WEBLLM__.configVersion !== ENGINE_CONFIG_VERSION
+  ) {
+    g.__WETWARE_WEBLLM__ = {
+      engine: null,
+      loadedModelId: null,
+      configVersion: ENGINE_CONFIG_VERSION,
+    };
   }
   return g.__WETWARE_WEBLLM__;
 })();
@@ -115,7 +125,7 @@ export async function checkCachedWebLlmModels(): Promise<
   const result: Record<WebLlmModelId, boolean> = {
     'gemma3-1b-it-q4f16_1-MLC': false,
     'gemma-2-2b-it-q4f32_1-MLC-1k': false,
-    'gemma-4-E2B-it-q4f16_1-MLC': false,
+    'gemma-4-E2B-it-q4f32_1-MLC': false,
   };
   try {
     const { hasModelInCache, prebuiltAppConfig } = await import(
@@ -157,13 +167,21 @@ export async function initWebLlmEngine(
   );
   const resolvedModelId = matchedRecord ? matchedRecord.model_id : modelId;
 
-  // Resolve WindowSizeConfigurationError in gemma3-1b-it-q4f16_1-MLC where upstream
-  // mlc-chat-config.json sets sliding_window_size: 512 while prebuiltAppConfig sets
-  // context_window_size: 4096 without resetting sliding_window_size to -1.
-  const chatOpts = {
-    context_window_size: 1024,
-    sliding_window_size: -1,
-  };
+  // gemma3-1b-it-q4f16_1_cs1k-webgpu.wasm is compiled with AttnKind::kMHASliding
+  // (sliding_window_size: 512). Setting sliding_window_size: -1 disables sliding
+  // window KV cache setup (`fKVCacheEnableSlidingWindowForSeq`), causing uninitialized
+  // KV cache reads and random token output. Instead, set context_window_size: -1,
+  // sliding_window_size: 512, attention_sink_size: 0 for gemma3-1b.
+  const isGemma3SlidingWindow = resolvedModelId
+    .toLowerCase()
+    .includes('gemma3-1b');
+  const chatOpts = isGemma3SlidingWindow
+    ? {
+        context_window_size: -1,
+        sliding_window_size: 512,
+        attention_sink_size: 0,
+      }
+    : undefined;
 
   if (
     globalState.engine &&
