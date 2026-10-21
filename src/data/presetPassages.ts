@@ -53,7 +53,7 @@ const PRESET_SEEDS: RawPresetSeed[] = [
       'advance across text',
       'in ballistic jumps',
       'known as saccades,',
-      'pausing forroughly',
+      'pausing for roughly',
       'two hundred milliseconds',
       'at each fixation.',
       'During these brief',
