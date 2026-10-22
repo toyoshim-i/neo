@@ -108,86 +108,142 @@ export function saveTranslationLangSelection(lang: TranslationLangCode): void {
 // - Semantic chunking & Cloze sentence extraction are handled deterministically in <1ms by `chunker.ts`.
 // - Instead of asking a tiny 1B model to synthesize nested JSON quizzes (which exceeds 1B reasoning capacity
 //   and causes 2B+ models to OOM on iOS), the LLM is only asked for 3 comma-separated distractor words per blank.
+function sanitizeTargetWord(raw: string): string {
+  const words = raw.trim().match(/[A-Za-z]{3,}/g);
+  return words ? words[words.length - 1].toLowerCase() : 'concept';
+}
+
 function buildDistractorPrompt(targetWords: string[]): string {
   const numbered = targetWords
-    .map((w, idx) => `${idx + 1}. ${w}:`)
+    .map((w, idx) => `${idx + 1}. ${sanitizeTargetWord(w)} ->`)
     .join('\n');
-  return `For each English word below, list 3 different English words of the same part of speech that can serve as wrong multiple-choice distractors. Output ONLY comma-separated words on each numbered line (no sentences, no JSON).
+  return `Write 3 related English words for each word below. Use commas.
 
-Example:
-1. velocity: momentum, altitude, friction
-2. cortical: neural, auditory, vascular
+1. velocity -> speed, motion, tempo
+2. cortical -> neural, cerebral, sensory
+3. painting -> sculpture, drawing, fresco
 
-Words:
-${numbered}
-
-Output:`;
+Now complete these 3 lines with 3 words on each line:
+${numbered}`;
 }
+
+const PROMPT_STOPWORDS = new Set([
+  'word',
+  'words',
+  'output',
+  'example',
+  'choice',
+  'option',
+  'velocity',
+  'speed',
+  'motion',
+  'tempo',
+  'cortical',
+  'neural',
+  'cerebral',
+  'sensory',
+  'painting',
+  'sculpture',
+  'drawing',
+  'fresco',
+  'related',
+  'english',
+  'complete',
+  'these',
+  'lines',
+]);
 
 function applyLlmDistractorsToQuestions(
   baseQuestions: QuizQuestion[],
   rawLlmText: string
 ): { updatedQuestions: QuizQuestion[]; appliedCount: number } {
-  const lines = rawLlmText
+  const cleanedText = rawLlmText
     .replace(/<think>[\s\S]*?<\/think>/gi, '')
-    .replace(/<\|thought\|>[\s\S]*?(?:<\|thought\|>|<\/thought>|<thought\|>)/gi, '')
+    .replace(
+      /<\|thought\|>[\s\S]*?(?:<\|thought\|>|<\/thought>|<thought\|>)/gi,
+      ''
+    )
+    .trim();
+
+  const lines = cleanedText
     .split('\n')
     .map((l) => l.trim())
     .filter(Boolean);
 
-  // Also collect all valid English words >= 4 chars across the whole response as backup pool
+  const targetLowerSet = new Set(
+    baseQuestions.map((q) =>
+      sanitizeTargetWord(q.options[q.correctIndex]).toLowerCase()
+    )
+  );
+
+  // Collect all valid English words >= 3 chars across the whole response as a shared pool
+  // (Handles both multi-line output and single-line output like "1. Skilled, 2. Diagnostic, 3. Probe.")
   const allCandidateWords = Array.from(
     new Set(
-      (rawLlmText.match(/\b[A-Za-z]{4,18}\b/g) || []).map((w) =>
-        w.toLowerCase()
-      )
+      (cleanedText.match(/\b[A-Za-z]{3,18}\b/g) || [])
+        .map((w) => w.toLowerCase())
+        .filter((w) => !targetLowerSet.has(w) && !PROMPT_STOPWORDS.has(w))
     )
   );
 
   let appliedCount = 0;
+  let globalCursor = 0;
+
   const updatedQuestions = baseQuestions.map((q, idx) => {
     const correctWord = q.options[q.correctIndex];
-    const lowerCorrect = correctWord.toLowerCase();
+    const lowerCorrect = sanitizeTargetWord(correctWord).toLowerCase();
 
-    // Find matching numbered line (e.g. "1." or line at idx)
+    // Find matching numbered line (e.g. "1." or "1)") if multi-line
     const numberedLine =
-      lines.find((l) => l.startsWith(`${idx + 1}.`) || l.startsWith(`${idx + 1}:`)) ||
+      lines.find(
+        (l) =>
+          l.startsWith(`${idx + 1}.`) ||
+          l.startsWith(`${idx + 1}:`) ||
+          l.startsWith(`${idx + 1})`)
+      ) ||
       lines[idx] ||
       '';
-    const afterColon = numberedLine.includes(':')
-      ? numberedLine.split(':').slice(1).join(':')
-      : numberedLine.replace(/^\d+[.)]\s*/, '');
+
+    // Strip leading "1. targetWord ->" or "1. targetWord:" only if multiple lines exist
+    const rhs =
+      lines.length >= 2 && numberedLine.includes('->')
+        ? numberedLine.split('->').slice(1).join(' ')
+        : lines.length >= 2 && numberedLine.includes(':')
+        ? numberedLine.split(':').slice(1).join(' ')
+        : numberedLine;
 
     const lineWords = Array.from(
       new Set(
-        (afterColon.match(/\b[A-Za-z]{4,18}\b/g) || [])
+        (rhs.match(/\b[A-Za-z]{3,18}\b/g) || [])
           .map((w) => w.toLowerCase())
           .filter(
             (w) =>
               w !== lowerCorrect &&
-              !['word', 'words', 'output', 'example', 'choice', 'option'].includes(w)
+              !targetLowerSet.has(w) &&
+              !PROMPT_STOPWORDS.has(w)
           )
       )
     );
 
-    const distractors = [...lineWords];
-    for (const backup of allCandidateWords) {
+    const distractors: string[] = [];
+    for (const w of lineWords) {
       if (distractors.length >= 3) break;
-      if (
-        backup !== lowerCorrect &&
-        !distractors.includes(backup) &&
-        !baseQuestions.some(
-          (bq) => bq.options[bq.correctIndex].toLowerCase() === backup
-        ) &&
-        !['word', 'words', 'output', 'example', 'choice', 'option', 'velocity', 'cortical'].includes(
-          backup
-        )
-      ) {
-        distractors.push(backup);
+      if (!distractors.includes(w)) {
+        distractors.push(w);
       }
     }
 
-    if (distractors.length < 3) {
+    // Top up from the global LLM candidate pool
+    while (distractors.length < 3 && globalCursor < allCandidateWords.length) {
+      const candidate = allCandidateWords[globalCursor++];
+      if (candidate !== lowerCorrect && !distractors.includes(candidate)) {
+        distractors.push(candidate);
+      }
+    }
+
+    // If the LLM only returned 1 or 2 words total (e.g. "1. WordA, 2. WordB, 3. WordC"),
+    // still apply the LLM word(s) we got and keep existing rule-based distractors for the remaining slots!
+    if (distractors.length === 0) {
       return q;
     }
 
@@ -200,8 +256,14 @@ function applyLlmDistractorsToQuestions(
     ];
     let dIdx = 0;
     for (let slot = 0; slot < 4; slot++) {
-      if (slot !== q.correctIndex && dIdx < 3) {
-        nextOptions[slot] = distractors[dIdx++];
+      if (slot !== q.correctIndex && dIdx < distractors.length) {
+        // Match capitalization of the correct option if capitalized
+        const rawDist = distractors[dIdx++];
+        const formatted =
+          /^[A-Z]/.test(correctWord)
+            ? rawDist.charAt(0).toUpperCase() + rawDist.slice(1)
+            : rawDist;
+        nextOptions[slot] = formatted;
       }
     }
 

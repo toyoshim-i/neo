@@ -2282,7 +2282,7 @@ export function App() {
                           const t0 = performance.now();
                           try {
                             const sampleText =
-                              'Skilled readers extract vital structural cues from the parafovea. Consequently, grouping words into semantic chunks bypasses slow vocal articulation.';
+                              'Skilled readers extract vital structural cues from the parafovea. Consequently, grouping words into semantic chunks bypasses slow vocal articulation. Furthermore, rhythmically pacing visual fixation stabilizes working memory integration.';
                             const { passage, usedProvider, fallbackReason } =
                               await processPassageWithOptionalLlm({
                                 title: 'LLM Diagnostic Probe',

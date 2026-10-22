@@ -185,18 +185,25 @@ export function generateHeuristicQuestions(
   });
 
   while (questions.length < 3) {
+    const extraWord =
+      contentWords[questions.length + 2] ||
+      fallbackPool[questions.length] ||
+      'cognition';
+    const extraDistractors = [...contentWords, ...fallbackPool]
+      .filter((w) => w.toLowerCase() !== extraWord.toLowerCase())
+      .slice(0, 3);
     questions.push({
       id: `q-auto-fallback-${questions.length}`,
-      code: `BIO-EV-0${questions.length + 1}`,
-      question: `What is the central subject discussed in "${title}"?`,
+      code: `SYNAPSE-0${questions.length + 1}`,
+      question: `Which core concept is emphasized in "${title}"?`,
       options: [
-        title,
-        'Medieval agricultural taxation systems',
-        'Submarine acoustic sonar calibration',
-        'Atmospheric barometric pressure charts',
+        extraWord,
+        extraDistractors[0] || 'entropy',
+        extraDistractors[1] || 'latency',
+        extraDistractors[2] || 'perception',
       ],
       correctIndex: 0,
-      explanation: `The passage specifically focuses on "${title}".`,
+      explanation: `The passage specifically emphasizes "${extraWord}" within "${title}".`,
     });
   }
 
