@@ -60,31 +60,158 @@ export function saveWebLlmModelSelection(modelId: WebLlmModelId): void {
 
 export const DEFAULT_WEBLLM_MODEL: WebLlmModelId = getSavedWebLlmModel();
 
-// Hybrid Rule + LLM Architecture:
-// - Semantic chunking & discourse marker detection are handled deterministically in <1ms by `chunker.ts`
-//   (avoiding 400-600 wasted output tokens of the LLM repeating the passage word-for-word).
-// - The on-device LLM focuses exclusively on generating 3 compact anti-skimming comprehension questions.
-function buildQuizGenerationPrompt(passageText: string): string {
-  const compactInput = truncatePassageForLlm(passageText);
-  return `Read the passage below and write 3 multiple-choice comprehension questions about its specific facts and main idea.
-Each question must have 4 short answer choices in an array, the 0-based index of the correct choice, and a short explanation.
-Output ONLY valid JSON (no markdown fences, no commentary).
+export type TranslationLangCode =
+  | 'ja'
+  | 'zh-CN'
+  | 'zh-TW'
+  | 'ko'
+  | 'es'
+  | 'fr'
+  | 'de';
 
-Example format for a passage about CPU caches:
-{"questions":[{"question":"Why do processors use L1 cache?","options":["To reduce memory access latency","To cool the silicon die","To replace disk storage","To slow down clock speed"],"correctIndex":0,"explanation":"L1 cache stores frequently used data close to the core."},{"question":"What happens on a cache miss?","options":["The CPU fetches data from slower main RAM","The system shuts down immediately","The clock multiplier doubles","Registers are erased"],"correctIndex":0,"explanation":"A miss requires fetching from lower memory tiers."}]}
+export const TRANSLATION_LANGUAGES: Array<{
+  code: TranslationLangCode;
+  label: string;
+  englishName: string;
+}> = [
+  { code: 'ja', label: 'JAPANESE (日本語)', englishName: 'Japanese' },
+  { code: 'zh-CN', label: 'CHINESE (简体)', englishName: 'Simplified Chinese' },
+  { code: 'zh-TW', label: 'CHINESE (繁體)', englishName: 'Traditional Chinese' },
+  { code: 'ko', label: 'KOREAN (한국어)', englishName: 'Korean' },
+  { code: 'es', label: 'SPANISH (ES)', englishName: 'Spanish' },
+  { code: 'fr', label: 'FRENCH (FR)', englishName: 'French' },
+  { code: 'de', label: 'GERMAN (DE)', englishName: 'German' },
+];
 
-Passage to quiz:
-"${compactInput}"
+const TRANSLATION_LANG_STORAGE_KEY = 'wetware_translation_lang';
 
-JSON output for the passage above:`;
+export function getSavedTranslationLang(): TranslationLangCode {
+  if (typeof window !== 'undefined') {
+    const saved = window.localStorage.getItem(TRANSLATION_LANG_STORAGE_KEY);
+    if (
+      saved &&
+      TRANSLATION_LANGUAGES.some((l) => l.code === saved)
+    ) {
+      return saved as TranslationLangCode;
+    }
+  }
+  return 'ja';
 }
 
-const MAX_LLM_INPUT_WORDS = 180;
+export function saveTranslationLangSelection(lang: TranslationLangCode): void {
+  if (typeof window !== 'undefined') {
+    window.localStorage.setItem(TRANSLATION_LANG_STORAGE_KEY, lang);
+  }
+}
 
-function truncatePassageForLlm(rawText: string): string {
-  const words = rawText.trim().split(/\s+/);
-  if (words.length <= MAX_LLM_INPUT_WORDS) return rawText.trim();
-  return words.slice(0, MAX_LLM_INPUT_WORDS).join(' ') + '...';
+// Hybrid Rule + Lightweight LLM Distractor Architecture (Method 2):
+// - Semantic chunking & Cloze sentence extraction are handled deterministically in <1ms by `chunker.ts`.
+// - Instead of asking a tiny 1B model to synthesize nested JSON quizzes (which exceeds 1B reasoning capacity
+//   and causes 2B+ models to OOM on iOS), the LLM is only asked for 3 comma-separated distractor words per blank.
+function buildDistractorPrompt(targetWords: string[]): string {
+  const numbered = targetWords
+    .map((w, idx) => `${idx + 1}. ${w}:`)
+    .join('\n');
+  return `For each English word below, list 3 different English words of the same part of speech that can serve as wrong multiple-choice distractors. Output ONLY comma-separated words on each numbered line (no sentences, no JSON).
+
+Example:
+1. velocity: momentum, altitude, friction
+2. cortical: neural, auditory, vascular
+
+Words:
+${numbered}
+
+Output:`;
+}
+
+function applyLlmDistractorsToQuestions(
+  baseQuestions: QuizQuestion[],
+  rawLlmText: string
+): { updatedQuestions: QuizQuestion[]; appliedCount: number } {
+  const lines = rawLlmText
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .replace(/<\|thought\|>[\s\S]*?(?:<\|thought\|>|<\/thought>|<thought\|>)/gi, '')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  // Also collect all valid English words >= 4 chars across the whole response as backup pool
+  const allCandidateWords = Array.from(
+    new Set(
+      (rawLlmText.match(/\b[A-Za-z]{4,18}\b/g) || []).map((w) =>
+        w.toLowerCase()
+      )
+    )
+  );
+
+  let appliedCount = 0;
+  const updatedQuestions = baseQuestions.map((q, idx) => {
+    const correctWord = q.options[q.correctIndex];
+    const lowerCorrect = correctWord.toLowerCase();
+
+    // Find matching numbered line (e.g. "1." or line at idx)
+    const numberedLine =
+      lines.find((l) => l.startsWith(`${idx + 1}.`) || l.startsWith(`${idx + 1}:`)) ||
+      lines[idx] ||
+      '';
+    const afterColon = numberedLine.includes(':')
+      ? numberedLine.split(':').slice(1).join(':')
+      : numberedLine.replace(/^\d+[.)]\s*/, '');
+
+    const lineWords = Array.from(
+      new Set(
+        (afterColon.match(/\b[A-Za-z]{4,18}\b/g) || [])
+          .map((w) => w.toLowerCase())
+          .filter(
+            (w) =>
+              w !== lowerCorrect &&
+              !['word', 'words', 'output', 'example', 'choice', 'option'].includes(w)
+          )
+      )
+    );
+
+    const distractors = [...lineWords];
+    for (const backup of allCandidateWords) {
+      if (distractors.length >= 3) break;
+      if (
+        backup !== lowerCorrect &&
+        !distractors.includes(backup) &&
+        !baseQuestions.some(
+          (bq) => bq.options[bq.correctIndex].toLowerCase() === backup
+        ) &&
+        !['word', 'words', 'output', 'example', 'choice', 'option', 'velocity', 'cortical'].includes(
+          backup
+        )
+      ) {
+        distractors.push(backup);
+      }
+    }
+
+    if (distractors.length < 3) {
+      return q;
+    }
+
+    appliedCount++;
+    const nextOptions: [string, string, string, string] = [...q.options] as [
+      string,
+      string,
+      string,
+      string,
+    ];
+    let dIdx = 0;
+    for (let slot = 0; slot < 4; slot++) {
+      if (slot !== q.correctIndex && dIdx < 3) {
+        nextOptions[slot] = distractors[dIdx++];
+      }
+    }
+
+    return {
+      ...q,
+      options: nextOptions,
+    };
+  });
+
+  return { updatedQuestions, appliedCount };
 }
 
 // Persist engine singleton on globalThis so Vite HMR updates never drop VRAM state
@@ -526,7 +653,20 @@ export async function processPassageWithOptionalLlm(params: {
 }> {
   let fallbackReason: string | undefined;
 
-  // Tier A: In-Browser WebGPU (@mlc-ai/web-llm)
+  // Step 1: Build deterministic rule-based chunks + Cloze quiz skeleton (<1ms)
+  const basePassage = buildNormalizedPassage({
+    title: params.title,
+    rawText: params.rawText,
+    category: params.category,
+    sourceType: params.sourceType,
+  });
+
+  const targetWords = basePassage.questions.map(
+    (q) => q.options[q.correctIndex]
+  );
+  const distractorPrompt = buildDistractorPrompt(targetWords);
+
+  // Tier A: In-Browser WebGPU (@mlc-ai/web-llm) — Ultra-lightweight distractor word generation
   if (params.provider === 'webllm') {
     try {
       const modelId = params.webLlmModel || DEFAULT_WEBLLM_MODEL;
@@ -536,37 +676,37 @@ export async function processPassageWithOptionalLlm(params: {
       });
 
       params.onProgress?.(
-        `Running on-device WebGPU inference (${modelId})...`
+        `Generating Cloze distractors on WebGPU (${modelId})...`
       );
 
-      // Combine Concrete 1-shot example + passage into a single user turn
-      const combinedPrompt = buildQuizGenerationPrompt(params.rawText);
-
       const reply = await engine.chat.completions.create({
-        messages: [{ role: 'user', content: combinedPrompt }],
-        temperature: 0.2,
-        max_tokens: 420,
+        messages: [{ role: 'user', content: distractorPrompt }],
+        temperature: 0.3,
+        max_tokens: 64,
       });
 
       const content = reply.choices?.[0]?.message?.content || '';
-      const parsed = parseLlmJsonOutput(content);
+      const { updatedQuestions, appliedCount } = applyLlmDistractorsToQuestions(
+        basePassage.questions,
+        content
+      );
+
+      if (appliedCount === 0) {
+        const preview = content.replace(/\s+/g, ' ').trim().slice(0, 120);
+        throw new Error(`No valid distractor words parsed | Raw: "${preview}"`);
+      }
 
       return {
-        passage: buildNormalizedPassage({
-          title: params.title,
-          rawText: params.rawText,
-          category: params.category,
-          sourceType: params.sourceType,
-          chunks: parsed.chunks,
-          discourseMarkerIndices: parsed.discourseMarkerIndices,
-          questions: parsed.questions,
-        }),
+        passage: {
+          ...basePassage,
+          questions: updatedQuestions,
+        },
         usedProvider: 'webllm',
       };
     } catch (err) {
       fallbackReason = err instanceof Error ? err.message : String(err);
       params.onProgress?.(
-        `WebGPU fallback (${fallbackReason}) -> using Rule-based Chunker...`
+        `WebGPU fallback (${fallbackReason}) -> using Rule-based Cloze...`
       );
     }
   }
@@ -584,19 +724,18 @@ export async function processPassageWithOptionalLlm(params: {
         : `${base}/api/generate`;
 
       const controller = new AbortController();
-      const timeout = window.setTimeout(() => controller.abort(), 18000);
+      const timeout = window.setTimeout(() => controller.abort(), 15000);
 
-      const promptText = buildQuizGenerationPrompt(params.rawText);
       const body = isOpenAiCompat
         ? JSON.stringify({
             model: params.llmModel || 'gemma2:2b',
-            messages: [{ role: 'user', content: promptText }],
-            temperature: 0.2,
+            messages: [{ role: 'user', content: distractorPrompt }],
+            temperature: 0.3,
+            max_tokens: 64,
           })
         : JSON.stringify({
             model: params.llmModel || 'gemma2:2b',
-            prompt: promptText,
-            format: 'json',
+            prompt: distractorPrompt,
             stream: false,
           });
 
@@ -614,19 +753,18 @@ export async function processPassageWithOptionalLlm(params: {
           ? json.choices?.[0]?.message?.content || ''
           : json.response || '';
 
-        const parsed = parseLlmJsonOutput(rawContent);
-        return {
-          passage: buildNormalizedPassage({
-            title: params.title,
-            rawText: params.rawText,
-            category: params.category,
-            sourceType: params.sourceType,
-            chunks: parsed.chunks,
-            discourseMarkerIndices: parsed.discourseMarkerIndices,
-            questions: parsed.questions,
-          }),
-          usedProvider: 'ollama',
-        };
+        const { updatedQuestions, appliedCount } =
+          applyLlmDistractorsToQuestions(basePassage.questions, rawContent);
+        if (appliedCount > 0) {
+          return {
+            passage: {
+              ...basePassage,
+              questions: updatedQuestions,
+            },
+            usedProvider: 'ollama',
+          };
+        }
+        fallbackReason = 'No valid distractor words parsed from Ollama';
       } else {
         fallbackReason = `HTTP ${response.status} from ${url}`;
       }
@@ -637,13 +775,119 @@ export async function processPassageWithOptionalLlm(params: {
 
   // Tier C: Rule-based Chunker & Cloze Generator Fallback
   return {
-    passage: buildNormalizedPassage({
-      title: params.title,
-      rawText: params.rawText,
-      category: params.category,
-      sourceType: params.sourceType,
-    }),
+    passage: basePassage,
     usedProvider: 'rule_based',
     fallbackReason,
+  };
+}
+
+/**
+ * Translates a selected word or phrase into the user's configured target language.
+ * - Uses in-browser WebLLM (if provider === 'webllm' and loaded in VRAM) or Ollama (if provider === 'ollama').
+ * - Automatically falls back to the zero-VRAM MyMemory Translation API so iPhones/mobile devices
+ *   can translate words instantaneously without loading a multi-GB model into RAM.
+ */
+export async function translateSelection(params: {
+  text: string;
+  contextSentence?: string;
+  targetLang: TranslationLangCode;
+  provider: LlmProviderType;
+  webLlmModel?: string;
+  llmEndpoint?: string;
+  llmModel?: string;
+}): Promise<{
+  translation: string;
+  source: 'webllm' | 'ollama' | 'cloud_dict';
+}> {
+  const cleanText = params.text.trim();
+  const langInfo =
+    TRANSLATION_LANGUAGES.find((l) => l.code === params.targetLang) ||
+    TRANSLATION_LANGUAGES[0];
+
+  const prompt = params.contextSentence
+    ? `Translate "${cleanText}" into ${langInfo.englishName} (used in: "${params.contextSentence}"). Output ONLY the concise ${langInfo.englishName} translation in one short line:`
+    : `Translate "${cleanText}" into ${langInfo.englishName}. Output ONLY the concise ${langInfo.englishName} translation in one short line:`;
+
+  // 1. If WebLLM is selected AND already loaded in VRAM (or user explicitly chose webllm), try fast 1-line translation
+  if (params.provider === 'webllm' && isWebLlmReady(params.webLlmModel)) {
+    try {
+      const engine = await initWebLlmEngine(
+        params.webLlmModel || DEFAULT_WEBLLM_MODEL
+      );
+      const reply = await engine.chat.completions.create({
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.1,
+        max_tokens: 48,
+      });
+      const out = (reply.choices?.[0]?.message?.content || '')
+        .replace(/<think>[\s\S]*?<\/think>/gi, '')
+        .replace(/<\|thought\|>[\s\S]*?(?:<\|thought\|>|<\/thought>|<thought\|>)/gi, '')
+        .split('\n')[0]
+        .replace(/^["'`]+|["'`]+$/g, '')
+        .trim();
+      if (out) {
+        return { translation: out, source: 'webllm' };
+      }
+    } catch {
+      // Fall through to instant dictionary API
+    }
+  }
+
+  // 2. If Ollama is selected
+  if (params.provider === 'ollama' && params.llmEndpoint) {
+    try {
+      const base = params.llmEndpoint.replace(/\/$/, '');
+      const isOpenAiCompat = base.includes(':1234') || base.endsWith('/v1');
+      const url = isOpenAiCompat
+        ? `${base.replace(/\/v1$/, '')}/v1/chat/completions`
+        : `${base}/api/generate`;
+      const body = isOpenAiCompat
+        ? JSON.stringify({
+            model: params.llmModel || 'gemma2:2b',
+            messages: [{ role: 'user', content: prompt }],
+            temperature: 0.1,
+            max_tokens: 48,
+          })
+        : JSON.stringify({
+            model: params.llmModel || 'gemma2:2b',
+            prompt,
+            stream: false,
+          });
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+      });
+      if (res.ok) {
+        const json = await res.json();
+        const raw: string = isOpenAiCompat
+          ? json.choices?.[0]?.message?.content || ''
+          : json.response || '';
+        const out = raw.split('\n')[0].replace(/^["'`]+|["'`]+$/g, '').trim();
+        if (out) {
+          return { translation: out, source: 'ollama' };
+        }
+      }
+    } catch {
+      // Fall through to instant dictionary API
+    }
+  }
+
+  // 3. Zero-VRAM Instant Translation Fallback (MyMemory REST API — works on iPhone without OOM)
+  const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(
+    cleanText
+  )}&langpair=en|${encodeURIComponent(params.targetLang)}`;
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error(`Translation request failed (${res.status})`);
+  }
+  const data = await res.json();
+  const translated: string = data?.responseData?.translatedText || '';
+  if (!translated) {
+    throw new Error('No translation returned');
+  }
+  return {
+    translation: translated,
+    source: 'cloud_dict',
   };
 }

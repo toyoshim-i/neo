@@ -19,6 +19,7 @@ import {
   Upload,
   Loader2,
   Cpu,
+  Languages,
 } from 'lucide-react';
 import { CyberHeader } from './components/layout/CyberHeader';
 import { ChamferedPanel } from './components/layout/ChamferedPanel';
@@ -66,6 +67,11 @@ import {
   isWebLlmReady,
   checkCachedWebLlmModels,
   saveWebLlmModelSelection,
+  TranslationLangCode,
+  TRANSLATION_LANGUAGES,
+  getSavedTranslationLang,
+  saveTranslationLangSelection,
+  translateSelection,
 } from './lib/llmClient';
 import { buildNormalizedPassage } from './lib/chunker';
 
@@ -114,6 +120,7 @@ export function App() {
     elapsedMs: number;
     chunks: string[];
     sampleQuestion: string;
+    sampleOptions?: string[];
     sampleAnswer: string;
     fallbackReason?: string;
   } | null>(null);
@@ -137,6 +144,9 @@ export function App() {
   );
   const [scanlineEnabled, setScanlineEnabled] = useState<boolean>(true);
   const [fadeOutPassed, setFadeOutPassed] = useState<boolean>(true);
+  const [translationLang, setTranslationLang] = useState<TranslationLangCode>(
+    getSavedTranslationLang()
+  );
   const [llmProvider, setLlmProvider] = useState<LlmProviderType>(
     isWebGpuSupported() ? 'webllm' : 'rule_based'
   );
@@ -171,6 +181,16 @@ export function App() {
   const [regressionCount, setRegressionCount] = useState<number>(0);
   const [totalSteps, setTotalSteps] = useState<number>(0);
   const [sessionResetKey, setSessionResetKey] = useState<number>(0);
+  const [lexiconPopup, setLexiconPopup] = useState<{
+    chunkText: string;
+    activeQuery: string;
+    words: string[];
+    contextSentence: string;
+    translation: string;
+    source?: 'webllm' | 'ollama' | 'cloud_dict';
+    loading: boolean;
+    error?: string;
+  } | null>(null);
 
   // Active Quiz State (1 question at a time)
   const [quizIndex, setQuizIndex] = useState<number>(0);
@@ -272,9 +292,84 @@ export function App() {
     setRegressionCount(0);
     setTotalSteps(0);
     setSessionResetKey((k) => k + 1);
+    setLexiconPopup(null);
     setIsPlaying(true);
     setScreen('reading');
   };
+
+  // Translate a tapped chunk or individual word into the user's configured target language
+  const handleTranslateChunkOrWord = useCallback(
+    async (queryText: string, chunkIdx: number, baseChunkText?: string) => {
+      soundEngine.playUiClick();
+      setIsPlaying(false);
+
+      const chunkStr =
+        baseChunkText ?? selectedPassage.chunks[chunkIdx] ?? queryText;
+      const words = Array.from(
+        new Set(
+          chunkStr
+            .split(/\s+/)
+            .map((w) => w.replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g, ''))
+            .filter((w) => w.length >= 2)
+        )
+      );
+
+      // Build surrounding ~12-word context window
+      const start = Math.max(0, chunkIdx - 2);
+      const end = Math.min(selectedPassage.chunks.length, chunkIdx + 3);
+      const contextSentence = selectedPassage.chunks.slice(start, end).join(' ');
+
+      setLexiconPopup({
+        chunkText: chunkStr,
+        activeQuery: queryText,
+        words,
+        contextSentence,
+        translation: '',
+        loading: true,
+      });
+
+      try {
+        const res = await translateSelection({
+          text: queryText,
+          contextSentence,
+          targetLang: translationLang,
+          provider: llmProvider,
+          webLlmModel: selectedWebLlmModel,
+          llmEndpoint: profile.llmEndpoint,
+          llmModel: profile.llmModel,
+        });
+        setLexiconPopup((prev) =>
+          prev && prev.activeQuery === queryText
+            ? {
+                ...prev,
+                translation: res.translation,
+                source: res.source,
+                loading: false,
+              }
+            : prev
+        );
+      } catch (err) {
+        setLexiconPopup((prev) =>
+          prev && prev.activeQuery === queryText
+            ? {
+                ...prev,
+                loading: false,
+                error:
+                  err instanceof Error ? err.message : 'Translation failed',
+              }
+            : prev
+        );
+      }
+    },
+    [
+      selectedPassage.chunks,
+      translationLang,
+      llmProvider,
+      selectedWebLlmModel,
+      profile.llmEndpoint,
+      profile.llmModel,
+    ]
+  );
 
   // Transition from Reading to Quiz
   const startQuizPhase = useCallback(() => {
@@ -1098,6 +1193,19 @@ export function App() {
                   <div className="w-48 h-px bg-[#FF1E7A]/40 relative">
                     <div className="w-0.5 h-3 bg-[#FF1E7A] absolute left-1/2 -bottom-1.5" />
                   </div>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleTranslateChunkOrWord(
+                        selectedPassage.chunks[activeChunkIndex] || '',
+                        activeChunkIndex
+                      )
+                    }
+                    className="cyber-btn px-3 py-1 bg-[#0D0618] border border-[#00F5D4]/50 text-[#00F5D4] font-terminal text-xs flex items-center gap-1.5 hover:bg-[#00F5D4]/15"
+                  >
+                    <Languages className="w-3.5 h-3.5" />
+                    <span>TRANSLATE CHUNK</span>
+                  </button>
                 </div>
               ) : (
                 <div className="leading-[2.2] text-lg sm:text-xl font-medium select-none">
@@ -1115,7 +1223,9 @@ export function App() {
                               setRegressionCount((r) => r + 1);
                             }
                             setActiveChunkIndex(idx);
+                            void handleTranslateChunkOrWord(chunk, idx, chunk);
                           }}
+                          title="Tap to pause & translate"
                           style={{
                             opacity: isPassed && fadeOutPassed ? 0.15 : 1,
                           }}
@@ -1137,12 +1247,109 @@ export function App() {
             </ChamferedPanel>
           )}
 
+          {/* Neural Lexicon Bar (Tap-to-Translate Phrase or Individual Word) */}
+          {selectedMode !== 'tachistoscope' && lexiconPopup && (
+            <div className="p-3.5 bg-[#180B29] border border-[#FFE600]/60 font-terminal text-xs space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-[#FFE600] font-bold flex items-center gap-1">
+                    <Languages className="w-3.5 h-3.5" />
+                    <span>LEXICON ({translationLang.toUpperCase()}):</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleTranslateChunkOrWord(
+                        lexiconPopup.chunkText,
+                        activeChunkIndex,
+                        lexiconPopup.chunkText
+                      )
+                    }
+                    className={`px-2 py-0.5 border cursor-pointer ${
+                      lexiconPopup.activeQuery === lexiconPopup.chunkText
+                        ? 'border-[#00F5D4] bg-[#00F5D4]/20 text-[#00F5F8] font-bold'
+                        : 'border-[#6C7A89]/40 bg-[#0D0618] text-[#6C7A89] hover:text-[#F2F5F8]'
+                    }`}
+                  >
+                    PHRASE: &ldquo;{lexiconPopup.chunkText}&rdquo;
+                  </button>
+                  {lexiconPopup.words.map((w) => (
+                    <button
+                      key={w}
+                      type="button"
+                      onClick={() =>
+                        handleTranslateChunkOrWord(
+                          w,
+                          activeChunkIndex,
+                          lexiconPopup.chunkText
+                        )
+                      }
+                      className={`px-2 py-0.5 border cursor-pointer ${
+                        lexiconPopup.activeQuery === w
+                          ? 'border-[#FFE600] bg-[#FFE600]/20 text-[#FFE600] font-bold'
+                          : 'border-[#6C7A89]/40 bg-[#0D0618] text-[#F2F5F8] hover:border-[#FFE600]/60'
+                      }`}
+                    >
+                      {w}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="flex items-center gap-2">
+                  {lexiconPopup.source && (
+                    <span className="text-[10px] px-1.5 py-0.5 bg-[#0D0618] border border-[#00F5D4]/40 text-[#00F5D4]">
+                      {lexiconPopup.source.toUpperCase()}
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setLexiconPopup(null)}
+                    className="text-[#6C7A89] hover:text-[#F2F5F8] cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="p-2.5 bg-[#0D0618] border border-[#00F5D4]/30 text-sm text-[#F2F5F8] flex items-center justify-between gap-3">
+                {lexiconPopup.loading ? (
+                  <span className="text-[#00F5D4] text-xs flex items-center gap-1.5">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>
+                      Translating &ldquo;{lexiconPopup.activeQuery}&rdquo;...
+                    </span>
+                  </span>
+                ) : lexiconPopup.error ? (
+                  <span className="text-[#FF1E7A] text-xs">
+                    {lexiconPopup.error}
+                  </span>
+                ) : (
+                  <span className="font-bold text-[#00F5D4]">
+                    {lexiconPopup.translation}
+                  </span>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    soundEngine.playUiClick();
+                    setLexiconPopup(null);
+                    setIsPlaying(true);
+                  }}
+                  className="cyber-btn px-2.5 py-1 bg-[#00F5D4] text-[#0D0618] font-bold text-[11px] shrink-0"
+                >
+                  RESUME
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Minimal Footer Hint & Skip to Quiz */}
           {selectedMode !== 'tachistoscope' && (
             <div className="flex items-center justify-between font-terminal text-xs text-[#6C7A89]">
               <span>
-                [SPACE] PAUSE/PLAY &nbsp;·&nbsp; [←/→] STEP &nbsp;·&nbsp; [↑/↓]
-                SPEED
+                [TAP CHUNK] TRANSLATE &nbsp;·&nbsp; [SPACE] PAUSE/PLAY
+                &nbsp;·&nbsp; [←/→] STEP
               </span>
               <button
                 type="button"
@@ -1795,6 +2002,39 @@ export function App() {
                   </button>
                 </div>
 
+                {/* Translation Target Language (Tap Chunk/Word to Translate) */}
+                <div className="py-2 border-b border-[#6C7A89]/20 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Languages className="w-4 h-4 text-[#00F5D4]" />
+                      <span>TAP-TO-TRANSLATE LANGUAGE</span>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                    {TRANSLATION_LANGUAGES.map((lang) => {
+                      const active = translationLang === lang.code;
+                      return (
+                        <button
+                          key={lang.code}
+                          type="button"
+                          onClick={() => {
+                            soundEngine.playUiClick();
+                            setTranslationLang(lang.code);
+                            saveTranslationLangSelection(lang.code);
+                          }}
+                          className={`cyber-btn py-1.5 px-2 border text-[10px] font-bold ${
+                            active
+                              ? 'border-[#00F5D4] bg-[#00F5D4]/20 text-[#00F5D4]'
+                              : 'border-[#6C7A89]/40 bg-[#0D0618] text-[#6C7A89] hover:text-[#F2F5F8]'
+                          }`}
+                        >
+                          {lang.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
                 {/* On-Device LLM Pipeline (WebGPU WebLLM / Ollama / Rule-based) */}
                 <div className="py-2 border-b border-[#6C7A89]/20 space-y-2.5">
                   <div className="flex items-center justify-between">
@@ -2047,6 +2287,7 @@ export function App() {
                               elapsedMs,
                               chunks: passage.chunks,
                               sampleQuestion: q0?.question || 'N/A',
+                              sampleOptions: q0?.options,
                               sampleAnswer:
                                 q0?.options[q0.correctIndex] || 'N/A',
                               fallbackReason,
@@ -2113,11 +2354,29 @@ export function App() {
                           </div>
 
                           <div>
-                            <div className="text-[#6C7A89]">SAMPLE QUIZ Q1:</div>
+                            <div className="text-[#6C7A89]">
+                              SAMPLE CLOZE QUIZ Q1 (LLM DISTRACTORS):
+                            </div>
                             <div className="text-[#F2F5F8] mt-0.5">
                               {llmDiagResult.sampleQuestion}
                             </div>
-                            <div className="text-[#00F5D4] mt-0.5">
+                            {llmDiagResult.sampleOptions && (
+                              <div className="flex flex-wrap gap-1 mt-1">
+                                {llmDiagResult.sampleOptions.map((opt, idx) => (
+                                  <span
+                                    key={idx}
+                                    className={`px-1.5 py-0.5 border ${
+                                      opt === llmDiagResult.sampleAnswer
+                                        ? 'border-[#00F5D4] bg-[#00F5D4]/15 text-[#00F5D4] font-bold'
+                                        : 'border-[#6C7A89]/40 bg-[#180B29] text-[#6C7A89]'
+                                    }`}
+                                  >
+                                    {opt}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                            <div className="text-[#00F5D4] mt-1">
                               ANS: {llmDiagResult.sampleAnswer}
                             </div>
                           </div>
