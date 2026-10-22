@@ -56,6 +56,7 @@ import {
 } from './lib/db';
 import {
   fetchWikipediaPassage,
+  fetchWikipediaArtPassage,
   fetchDevToPassage,
   processPassageWithOptionalLlm,
   LlmProviderType,
@@ -681,18 +682,24 @@ export function App() {
     ]
   );
 
-  // Live Feed Handler (Wikipedia / Dev.to) — Instant rule chunking + Background LLM Quiz
-  const handleFetchLivePassage = async (source: 'wikipedia' | 'devto') => {
+  // Live Feed Handler (Wikipedia / Art / Dev.to) — Instant rule chunking + Background LLM Quiz
+  const handleFetchLivePassage = async (
+    source: 'wikipedia' | 'wikipedia_art' | 'devto'
+  ) => {
     setIsFetchingFeed(true);
     setFeedStatusMsg(
       source === 'wikipedia'
         ? 'Fetching random summary from Wikipedia REST API...'
+        : source === 'wikipedia_art'
+        ? 'Fetching Arts & Aesthetics summary from Wikipedia REST API...'
         : 'Fetching top tech article from Dev.to API...'
     );
     try {
       const raw =
         source === 'wikipedia'
           ? await fetchWikipediaPassage()
+          : source === 'wikipedia_art'
+          ? await fetchWikipediaArtPassage()
           : await fetchDevToPassage();
 
       // 1. Instant (<2ms) rule-based syntactic chunking so reading can start immediately
@@ -700,7 +707,7 @@ export function App() {
         title: raw.title,
         rawText: raw.rawText,
         category: raw.category,
-        sourceType: source,
+        sourceType: source === 'devto' ? 'devto' : 'wikipedia',
       });
 
       await db.customPassages.put(instantPassage);
@@ -1721,7 +1728,7 @@ export function App() {
                       into semantic chunks with 3 comprehension questions.
                     </p>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                       <button
                         type="button"
                         disabled={isFetchingFeed}
@@ -1729,10 +1736,24 @@ export function App() {
                         className="cyber-btn p-4 bg-[#0D0618] border border-[#00F5D4] text-left hover:bg-[#00F5D4]/15"
                       >
                         <div className="font-terminal text-xs font-bold text-[#00F5D4]">
-                          WIKIPEDIA RANDOM SUMMARY
+                          WIKIPEDIA RANDOM
                         </div>
                         <div className="text-xs text-[#6C7A89] mt-1">
-                          ~150–280 word encyclopedia summary via REST v1 API.
+                          ~150–280 word general encyclopedia summary.
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        disabled={isFetchingFeed}
+                        onClick={() => handleFetchLivePassage('wikipedia_art')}
+                        className="cyber-btn p-4 bg-[#0D0618] border border-[#FF1E7A] text-left hover:bg-[#FF1E7A]/15"
+                      >
+                        <div className="font-terminal text-xs font-bold text-[#FF1E7A]">
+                          ART & AESTHETICS
+                        </div>
+                        <div className="text-xs text-[#6C7A89] mt-1">
+                          Curated painting, architecture, music & film theory.
                         </div>
                       </button>
 
@@ -1746,8 +1767,7 @@ export function App() {
                           DEV.TO TECH ARTICLE
                         </div>
                         <div className="text-xs text-[#6C7A89] mt-1">
-                          ~250 word excerpt from trending software engineering
-                          posts.
+                          ~250 word excerpt from software engineering posts.
                         </div>
                       </button>
                     </div>

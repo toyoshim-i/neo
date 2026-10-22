@@ -596,6 +596,67 @@ export async function fetchWikipediaPassage(): Promise<{
   };
 }
 
+const CURATED_ART_TOPICS: readonly string[] = [
+  'Impressionism',
+  'Cubism',
+  'Surrealism',
+  'Abstract_expressionism',
+  'Bauhaus',
+  'Ukiyo-e',
+  'Chiaroscuro',
+  'Golden_ratio',
+  'Gothic_architecture',
+  'Brutalist_architecture',
+  'De_Stijl',
+  'Art_Nouveau',
+  'Dada',
+  'Minimalism',
+  'Fugue',
+  'Counterpoint',
+  'Sonata_form',
+  'Polyphony',
+  'Film_noir',
+  'Soviet_montage_theory',
+  'Japanese_aesthetics',
+  'Wabi-sabi',
+  'Kintsugi',
+  'Perspective_(graphical)',
+  'Color_theory',
+  'Pointillism',
+  'Fauvism',
+  'Baroque_painting',
+];
+
+/**
+ * Fetches a curated Arts, Architecture, Music Theory, or Cinema summary from Wikipedia REST API v1
+ */
+export async function fetchWikipediaArtPassage(): Promise<{
+  title: string;
+  rawText: string;
+  category: string;
+}> {
+  const topic =
+    CURATED_ART_TOPICS[Math.floor(Math.random() * CURATED_ART_TOPICS.length)];
+  const res = await fetch(
+    `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(
+      topic
+    )}`
+  );
+  if (!res.ok) {
+    throw new Error(`Wikipedia Art API returned ${res.status}`);
+  }
+  const data = await res.json();
+  const extract: string = data.extract || '';
+  return {
+    title: data.title || topic.replace(/_/g, ' '),
+    rawText:
+      extract.split(/\s+/).length >= 60
+        ? extract
+        : `${extract} ${data.description || ''}`.trim(),
+    category: 'FINE_ARTS',
+  };
+}
+
 /**
  * Fetches a recent tech article from Dev.to API (CORS-enabled)
  */
