@@ -20,6 +20,10 @@ import {
   Loader2,
   Cpu,
   Languages,
+  Award,
+  Compass,
+  Trophy,
+  Sparkles,
 } from 'lucide-react';
 import { CyberHeader } from './components/layout/CyberHeader';
 import { ChamferedPanel } from './components/layout/ChamferedPanel';
@@ -30,12 +34,13 @@ import { TachistoscopeView } from './components/reader/TachistoscopeView';
 import { RadarBenchmarkChart } from './components/dashboard/RadarBenchmarkChart';
 import { OperatorMonitor, OperatorState } from './components/quiz/OperatorMonitor';
 import { soundEngine } from './lib/soundEngine';
-import { PRESET_PASSAGES } from './data/presetPassages';
+import { PRESET_PASSAGES, CALIBRATION_PASSAGE } from './data/presetPassages';
 import {
   TrainingMode,
   TrainingPassage,
   SessionLog,
   UserProfile,
+  AchievementId,
 } from './types/schema';
 import {
   FiveAxisMetrics,
@@ -47,9 +52,11 @@ import {
   DEFAULT_PROFILE,
   INITIAL_DEFAULT_WPM,
   QUIZ_PASS_THRESHOLD,
+  ACHIEVEMENT_CATALOG,
   getSavedTargetWpm,
   saveTargetWpmPreference,
   getOrInitProfile,
+  saveCalibrationBaseline,
   recordSessionAndUpdateProfile,
   exportDatabaseJson,
   importDatabaseJson,
@@ -76,7 +83,8 @@ import {
 } from './lib/llmClient';
 import { buildNormalizedPassage } from './lib/chunker';
 
-type ScreenState = 'home' | 'reading' | 'quiz' | 'result';
+type ScreenState = 'title' | 'calibration' | 'home' | 'reading' | 'quiz' | 'result';
+type AppExperienceMode = 'guided' | 'freeplay';
 type PassageModalTab = 'presets' | 'live' | 'custom';
 
 const MODE_INFO: Record<TrainingMode, { label: string; shortDesc: string }> = {
@@ -104,7 +112,17 @@ const MODE_INFO: Record<TrainingMode, { label: string; shortDesc: string }> = {
 
 export function App() {
   // Navigation & Hierarchy State
-  const [screen, setScreen] = useState<ScreenState>('home');
+  const [screen, setScreen] = useState<ScreenState>('title');
+  const [appMode, setAppMode] = useState<AppExperienceMode>('guided');
+  const [isCalibratingSession, setIsCalibratingSession] =
+    useState<boolean>(false);
+  const [calibrationStartMs, setCalibrationStartMs] = useState<number | null>(
+    null
+  );
+  const [measuredCalibrationRawWpm, setMeasuredCalibrationRawWpm] =
+    useState<number>(150);
+  const [showAchievementsModal, setShowAchievementsModal] =
+    useState<boolean>(false);
   const [showPassageModal, setShowPassageModal] = useState<boolean>(false);
   const [passageModalTab, setPassageModalTab] =
     useState<PassageModalTab>('presets');
@@ -211,6 +229,13 @@ export function App() {
   const [lastSessionMetrics, setLastSessionMetrics] =
     useState<FiveAxisMetrics | null>(null);
   const [isNewPersonalBest, setIsNewPersonalBest] = useState<boolean>(false);
+  const [isNewPassageBest, setIsNewPassageBest] = useState<boolean>(false);
+  const [previousPassageBest, setPreviousPassageBest] = useState<number>(0);
+  const [newlyUnlockedAchievements, setNewlyUnlockedAchievements] = useState<
+    AchievementId[]
+  >([]);
+  const [calibrationCompletedBanner, setCalibrationCompletedBanner] =
+    useState<number | null>(null);
 
   // Persist user-selected target WPM as the default for subsequent sessions
   useEffect(() => {
@@ -266,8 +291,100 @@ export function App() {
     ...customPassages,
     ...PRESET_PASSAGES,
   ];
-  const selectedPassage =
-    allPassages.find((p) => p.id === selectedPassageId) || PRESET_PASSAGES[0];
+  const selectedPassage = isCalibratingSession
+    ? CALIBRATION_PASSAGE
+    : allPassages.find((p) => p.id === selectedPassageId) || PRESET_PASSAGES[0];
+
+  // Apply Guided Curriculum Stage & Speed for a target passage
+  const applyGuidedRecommendationForPassage = useCallback(
+    (passageId: string, prof: UserProfile, referenceCurrentWpm: number) => {
+      const rec = prof.passageRecords?.[passageId];
+      const baseline = prof.baselineWpm || INITIAL_DEFAULT_WPM;
+      if (rec && rec.attempts > 0) {
+        // Previously played passage: resume from its recorded best raw/effective speed
+        const resumeWpm = Math.max(
+          baseline,
+          rec.bestRawWpm || rec.lastTargetWpm || rec.bestEffectiveWpm || baseline
+        );
+        setTargetWpm(resumeWpm);
+        if (rec.stageCompleted === 0) {
+          setSelectedMode('chunk_pacer');
+          setFadeOutPassed(false);
+        } else if (rec.stageCompleted === 1) {
+          setSelectedMode('chunk_pacer');
+          setFadeOutPassed(true);
+        } else {
+          setSelectedMode('overclock_432');
+          setFadeOutPassed(true);
+        }
+      } else {
+        // Unseen passage: transfer at 85% of prior active speed (or baseline if first passage)
+        const hasAnyPriorPassage =
+          Object.keys(prof.passageRecords || {}).length > 0;
+        const transferWpm = hasAnyPriorPassage
+          ? Math.max(80, Math.round(referenceCurrentWpm * 0.85))
+          : baseline;
+        setTargetWpm(transferWpm);
+        setSelectedMode('chunk_pacer');
+        setFadeOutPassed(false);
+      }
+    },
+    []
+  );
+
+  const selectPassageWithCoaching = useCallback(
+    (passageId: string) => {
+      setSelectedPassageId(passageId);
+      if (appMode === 'guided') {
+        applyGuidedRecommendationForPassage(passageId, profile, targetWpm);
+      }
+    },
+    [appMode, applyGuidedRecommendationForPassage, profile, targetWpm]
+  );
+
+  // Start Self-Paced Baseline Calibration
+  const startCalibrationProbe = () => {
+    soundEngine.playUiClick();
+    setIsCalibratingSession(true);
+    setCalibrationCompletedBanner(null);
+    setActiveChunkIndex(0);
+    setCalibrationStartMs(null);
+    setLexiconPopup(null);
+    setScreen('calibration');
+  };
+
+  const handleAdvanceCalibrationChunk = useCallback(() => {
+    const now = Date.now();
+    const startMs = calibrationStartMs ?? now;
+    if (calibrationStartMs === null) {
+      setCalibrationStartMs(now);
+    }
+
+    if (activeChunkIndex < CALIBRATION_PASSAGE.chunks.length - 1) {
+      const nextIdx = activeChunkIndex + 1;
+      setActiveChunkIndex(nextIdx);
+      soundEngine.playChunkTick(
+        CALIBRATION_PASSAGE.discourseMarkerIndices.includes(nextIdx)
+      );
+    } else {
+      // Completed reading all chunks in self-paced calibration
+      const elapsedMinutes = Math.max(0.08, (now - startMs) / 60000);
+      const rawMeasured = Math.max(
+        80,
+        Math.min(550, Math.round(CALIBRATION_PASSAGE.wordCount / elapsedMinutes))
+      );
+      setMeasuredCalibrationRawWpm(rawMeasured);
+      setTargetWpm(rawMeasured);
+      soundEngine.playPassTransition(3);
+      setQuizIndex(0);
+      setSelectedOption(null);
+      setCorrectCount(0);
+      setOperatorState('observing');
+      setLastResponseSec(null);
+      questionStartTimeRef.current = Date.now();
+      setScreen('quiz');
+    }
+  }, [activeChunkIndex, calibrationStartMs]);
 
   // Effective WPM during reading (accounts for 4/3/2 Overclock pass multiplier)
   const activeWpm =
@@ -415,6 +532,32 @@ export function App() {
     ) => {
       const syncRate =
         totalQuestions > 0 ? finalCorrect / totalQuestions : 1;
+      const quizPassed = syncRate >= QUIZ_PASS_THRESHOLD;
+
+      // Special Flow: Finishing Self-Paced Baseline Calibration
+      if (isCalibratingSession) {
+        const calibratedWpm = quizPassed
+          ? measuredCalibrationRawWpm
+          : Math.max(100, Math.round(measuredCalibrationRawWpm * 0.85));
+        try {
+          const { profile: updatedProf, newlyUnlocked } =
+            await saveCalibrationBaseline(calibratedWpm);
+          setProfile(updatedProf);
+          setNewlyUnlockedAchievements(newlyUnlocked);
+        } catch {
+          // Ignore DB error in private browsing
+        }
+        setIsCalibratingSession(false);
+        setTargetWpm(calibratedWpm);
+        setSelectedMode('chunk_pacer');
+        setFadeOutPassed(false);
+        setCalibrationCompletedBanner(calibratedWpm);
+        soundEngine.playRecordBreakerFanfare();
+        setScreen('home');
+        setShowPassageModal(true);
+        return;
+      }
+
       const effectiveWpm = Math.round(targetWpm * syncRate);
       const avgWordsPerChunk =
         selectedPassage.chunks.length > 0
@@ -441,11 +584,6 @@ export function App() {
       };
       setLastSessionMetrics(metrics);
 
-      const quizPassed = syncRate >= QUIZ_PASS_THRESHOLD;
-      const previousBest = profile.bestEffectiveWpm;
-      const beatBest = quizPassed && effectiveWpm > previousBest;
-      setIsNewPersonalBest(beatBest);
-
       const log: SessionLog = {
         id: `sess-${Date.now()}`,
         timestamp: Date.now(),
@@ -460,28 +598,53 @@ export function App() {
         synced: 0,
       };
 
+      let beatOverall = false;
+      let beatPassage = false;
+
       try {
-        const updatedProf = await recordSessionAndUpdateProfile(
+        const result = await recordSessionAndUpdateProfile(
           log,
           selectedPassage.wordCount,
-          targetWpm
+          targetWpm,
+          selectedPassage.category
         );
-        setProfile(updatedProf);
+        setProfile(result.profile);
+        beatOverall = result.isNewOverallBest;
+        beatPassage = result.isNewPassageBest;
+        setIsNewPersonalBest(result.isNewOverallBest);
+        setIsNewPassageBest(result.isNewPassageBest);
+        setPreviousPassageBest(result.previousPassageBest);
+        setNewlyUnlockedAchievements(result.newlyUnlocked);
         setSessionHistory((prev) => [log, ...prev.slice(0, 29)]);
       } catch {
         // Ignore DB error in private browsing
       }
 
-      soundEngine.playRankConfirm();
+      // Compute suggested next speed immediately so user can also tweak it manually on the Result screen
+      const { nextWpm } = computeNextTargetWpm(
+        targetWpm,
+        syncRate,
+        forwardFlowRate
+      );
+      setTargetWpm(nextWpm);
+
+      if (beatOverall || beatPassage) {
+        soundEngine.playRecordBreakerFanfare();
+        window.setTimeout(() => setJuiceShake(true), 40);
+        window.setTimeout(() => setJuiceShake(false), 550);
+      } else {
+        soundEngine.playRankConfirm();
+      }
       setScreen('result');
     },
     [
+      isCalibratingSession,
+      measuredCalibrationRawWpm,
       targetWpm,
       selectedPassage,
       totalSteps,
       regressionCount,
       selectedMode,
-      profile.bestEffectiveWpm,
     ]
   );
 
@@ -592,6 +755,19 @@ export function App() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [screen, selectedMode, activeChunkIndex, selectedPassage, startQuizPhase]);
+
+  // Keyboard shortcuts during Self-Paced Calibration
+  useEffect(() => {
+    if (screen !== 'calibration') return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code === 'Space' || e.code === 'ArrowRight' || e.code === 'Enter') {
+        e.preventDefault();
+        handleAdvanceCalibrationChunk();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [screen, handleAdvanceCalibrationChunk]);
 
   // Handle Quiz Option Selection
   const handleSelectQuizOption = useCallback(
@@ -739,7 +915,7 @@ export function App() {
 
       await db.customPassages.put(instantPassage);
       setCustomPassages((prev) => [instantPassage, ...prev]);
-      setSelectedPassageId(instantPassage.id);
+      selectPassageWithCoaching(instantPassage.id);
       setFeedStatusMsg('');
       setShowPassageModal(false);
       soundEngine.playQuizCorrect(false);
@@ -772,7 +948,7 @@ export function App() {
 
       await db.customPassages.put(instantPassage);
       setCustomPassages((prev) => [instantPassage, ...prev]);
-      setSelectedPassageId(instantPassage.id);
+      selectPassageWithCoaching(instantPassage.id);
       setCustomTitle('');
       setCustomRawText('');
       setFeedStatusMsg('');
@@ -817,8 +993,14 @@ export function App() {
   };
 
   const stepLabel =
-    screen === 'home'
-      ? 'CONSOLE'
+    screen === 'title'
+      ? 'MODE SELECT'
+      : screen === 'calibration'
+      ? 'NEURAL CALIBRATION'
+      : screen === 'home'
+      ? appMode === 'guided'
+        ? 'NEURAL COACH'
+        : 'FREEPLAY LAB'
       : screen === 'reading'
       ? `TRAINING // ${MODE_INFO[selectedMode].label}`
       : screen === 'quiz'
@@ -847,28 +1029,417 @@ export function App() {
         currentStepLabel={stepLabel}
         muted={muted}
         sessionCount={sessionHistory.length}
+        achievementCount={profile.unlockedAchievements?.length || 0}
+        totalAchievements={ACHIEVEMENT_CATALOG.length}
         onToggleMute={handleToggleMute}
+        onOpenAchievements={() => setShowAchievementsModal(true)}
         onOpenHistory={() => setShowHistoryModal(true)}
         onOpenSettings={() => setShowSettingsModal(true)}
         onGoHome={() => {
           setIsPlaying(false);
-          setScreen('home');
+          setIsCalibratingSession(false);
+          setScreen('title');
         }}
       />
 
       {/* =========================================================
-          SCREEN 1: HOME CONSOLE (Primary Action Only)
+          SCREEN 0: TITLE & PROTOCOL LAUNCHER (Guided vs Freeplay)
+      ========================================================= */}
+      {screen === 'title' && (
+        <main className="flex-1 max-w-2xl w-full mx-auto px-4 py-8 sm:py-12 flex flex-col justify-center space-y-6">
+          <div className="text-center space-y-2">
+            <div className="inline-flex items-center gap-2 px-3 py-1 bg-[#180B29] border border-[#00F5D4]/50 font-terminal text-xs text-[#00F5D4]">
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>SCIENCE-BACKED L2 VISUAL OVERCLOCKING</span>
+            </div>
+            <h1 className="text-2xl sm:text-4xl font-extrabold tracking-wider text-[#F2F5F8]">
+              SELECT TRAINING PROTOCOL
+            </h1>
+            <p className="text-xs sm:text-sm text-[#6C7A89] max-w-lg mx-auto">
+              Choose the automated cognitive coaching curriculum or unlock all
+              training modes and parameters manually.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4">
+            {/* Option 1: NEURAL COACH (Guided Curriculum) */}
+            <ChamferedPanel
+              variant="cyan"
+              cutSize={12}
+              tag="RECOMMENDED"
+              title="01 // NEURAL COACH (GUIDED CURRICULUM)"
+              rightSlot={
+                profile.baselineWpm ? (
+                  <span className="text-[#00F5D4] font-bold">
+                    BASELINE: {profile.baselineWpm} WPM
+                  </span>
+                ) : (
+                  <span className="text-[#FFE600] font-bold">
+                    STARTS WITH CALIBRATION
+                  </span>
+                )
+              }
+            >
+              <div className="p-5 space-y-4">
+                <p className="text-xs sm:text-sm text-[#F2F5F8] leading-relaxed">
+                  Automatically paces your speed and reading mode based on
+                  second-language fluency science:
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 font-terminal text-[11px]">
+                  <div className="p-2.5 bg-[#0D0618] border border-[#00F5D4]/30">
+                    <div className="text-[#00F5D4] font-bold">
+                      STAGE 1: CHUNK
+                    </div>
+                    <div className="text-[#6C7A89] mt-0.5">
+                      Absorb meaning &amp; vocabulary at comfortable speed.
+                    </div>
+                  </div>
+                  <div className="p-2.5 bg-[#0D0618] border border-[#00F5D4]/30">
+                    <div className="text-[#FFE600] font-bold">
+                      STAGE 2: PACER
+                    </div>
+                    <div className="text-[#6C7A89] mt-0.5">
+                      Fade passed chunks to eliminate backward regressions.
+                    </div>
+                  </div>
+                  <div className="p-2.5 bg-[#0D0618] border border-[#00F5D4]/30">
+                    <div className="text-[#FF1E7A] font-bold">
+                      STAGE 3: OVERCLOCK
+                    </div>
+                    <div className="text-[#6C7A89] mt-0.5">
+                      4/3/2 time compression to break inner speech limits.
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      soundEngine.playUiClick();
+                      setAppMode('guided');
+                      if (!profile.baselineWpm) {
+                        startCalibrationProbe();
+                      } else {
+                        applyGuidedRecommendationForPassage(
+                          selectedPassageId,
+                          profile,
+                          targetWpm
+                        );
+                        setScreen('home');
+                      }
+                    }}
+                    className="cyber-btn flex-1 py-3.5 px-5 bg-[#00F5D4] text-[#0D0618] font-bold text-sm tracking-wider flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(0,245,212,0.3)] hover:brightness-110"
+                  >
+                    <Compass className="w-4 h-4" />
+                    <span>
+                      {profile.baselineWpm
+                        ? 'ENTER NEURAL COACH'
+                        : 'START BASELINE CALIBRATION'}
+                    </span>
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+
+                  {profile.baselineWpm && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAppMode('guided');
+                        startCalibrationProbe();
+                      }}
+                      className="cyber-btn py-3.5 px-3.5 bg-[#0D0618] border border-[#6C7A89]/50 text-[#6C7A89] hover:border-[#00F5D4] hover:text-[#00F5D4] font-terminal text-xs"
+                    >
+                      RECALIBRATE
+                    </button>
+                  )}
+                </div>
+              </div>
+            </ChamferedPanel>
+
+            {/* Option 2: FREEPLAY LAB (Custom / Sandbox Mode) */}
+            <ChamferedPanel
+              variant="alt"
+              cutSize={12}
+              tag="SANDBOX / CUSTOM"
+              title="02 // FREEPLAY LAB (MANUAL OVERRIDE)"
+              rightSlot={
+                profile.bestEffectiveWpm > 0 ? (
+                  <span className="text-[#FF1E7A] font-bold">
+                    BEST: {profile.bestEffectiveWpm} eWPM
+                  </span>
+                ) : undefined
+              }
+            >
+              <div className="p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <p className="text-xs text-[#6C7A89] leading-relaxed">
+                  Unrestricted access to all 4 training engines (Chunk Pacer,
+                  RSVP Stream, 4/3/2 Overclock, Tachistoscope), manual WPM
+                  sliders, and live article feeds.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    soundEngine.playUiClick();
+                    setAppMode('freeplay');
+                    setIsCalibratingSession(false);
+                    setScreen('home');
+                  }}
+                  className="cyber-btn py-3 px-5 bg-[#180B29] border border-[#00F5D4] text-[#00F5D4] font-bold text-xs tracking-wider shrink-0 flex items-center justify-center gap-2 hover:bg-[#00F5D4]/15"
+                >
+                  <Sliders className="w-4 h-4" />
+                  <span>OPEN FREEPLAY LAB</span>
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </ChamferedPanel>
+          </div>
+        </main>
+      )}
+
+      {/* =========================================================
+          SCREEN 0.5: SELF-PACED BASELINE CALIBRATION PROBE
+      ========================================================= */}
+      {screen === 'calibration' && (
+        <main className="flex-1 max-w-3xl w-full mx-auto px-4 py-6 flex flex-col justify-between gap-5 relative z-20">
+          <div className="bg-[#180B29] border border-[#FFE600]/60 px-4 py-3 flex flex-wrap items-center justify-between gap-3 font-terminal text-xs">
+            <div className="flex items-center gap-2 text-[#FFE600] font-bold">
+              <Sparkles className="w-4 h-4" />
+              <span>
+                BASELINE CALIBRATION // STEP {activeChunkIndex + 1} OF{' '}
+                {CALIBRATION_PASSAGE.chunks.length}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                soundEngine.playUiClick();
+                setIsCalibratingSession(false);
+                setScreen('title');
+              }}
+              className="text-[#6C7A89] hover:text-[#F2F5F8] cursor-pointer"
+            >
+              CANCEL
+            </button>
+          </div>
+
+          <ChamferedPanel
+            variant="yellow"
+            cutSize={16}
+            tag="SELF-PACED PROBE"
+            title="READ AT YOUR NATURAL COMFORTABLE PACE"
+            className="flex-1 flex flex-col justify-center"
+            innerClassName="justify-center p-6 sm:p-10 space-y-6"
+          >
+            <p className="text-xs font-terminal text-[#FFE600] bg-[#0D0618] border border-[#FFE600]/30 p-3">
+              Tap the button below (or press <strong>SPACE / →</strong>) each
+              time you finish reading the highlighted phrase. Understand the
+              meaning naturally—a 3-question check follows!
+            </p>
+
+            <div
+              onClick={handleAdvanceCalibrationChunk}
+              className="leading-[2.2] text-lg sm:text-xl font-medium select-none cursor-pointer p-2"
+            >
+              {CALIBRATION_PASSAGE.chunks.map((chunk, idx) => {
+                const isActive = idx === activeChunkIndex;
+                const isPassed = idx < activeChunkIndex;
+                return (
+                  <span key={idx}>
+                    <span
+                      className={`inline py-0.5 border-y-2 transition-colors duration-75 ${
+                        isActive
+                          ? 'bg-[#FFE600]/20 border-[#FFE600] text-[#F2F5F8]'
+                          : isPassed
+                          ? 'bg-transparent border-[#180B29] text-[#6C7A89]/50'
+                          : 'bg-transparent border-[#180B29] text-[#6C7A89]'
+                      }`}
+                    >
+                      {chunk}
+                    </span>{' '}
+                  </span>
+                );
+              })}
+            </div>
+
+            <button
+              type="button"
+              onClick={handleAdvanceCalibrationChunk}
+              className="cyber-btn w-full py-4 bg-[#FFE600] text-[#0D0618] font-bold text-base tracking-wider flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(255,230,0,0.3)]"
+            >
+              <span>
+                {activeChunkIndex === 0
+                  ? 'TAP TO ADVANCE TO NEXT PHRASE [SPACE]'
+                  : activeChunkIndex < CALIBRATION_PASSAGE.chunks.length - 1
+                  ? `NEXT PHRASE (${activeChunkIndex + 1}/${CALIBRATION_PASSAGE.chunks.length}) [SPACE]`
+                  : 'FINISH READING & VERIFY COMPREHENSION'}
+              </span>
+              <ChevronRight className="w-5 h-5" />
+            </button>
+          </ChamferedPanel>
+        </main>
+      )}
+
+      {/* =========================================================
+          SCREEN 1: HOME CONSOLE (Guided Coach vs Freeplay Lab)
       ========================================================= */}
       {screen === 'home' && (
-        <main className="flex-1 max-w-2xl w-full mx-auto px-4 py-8 sm:py-12 flex flex-col justify-center space-y-6">
+        <main className="flex-1 max-w-2xl w-full mx-auto px-4 py-8 sm:py-10 flex flex-col justify-center space-y-5">
+          {/* Top Protocol Switcher Bar */}
+          <div className="flex flex-wrap items-center justify-between gap-2 bg-[#180B29] border border-[#00F5D4]/30 px-3.5 py-2 font-terminal text-xs">
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  soundEngine.playUiClick();
+                  setScreen('title');
+                }}
+                className="text-[#6C7A89] hover:text-[#F2F5F8] flex items-center gap-1 cursor-pointer"
+              >
+                <ArrowLeft className="w-3.5 h-3.5" />
+                <span>PROTOCOLS</span>
+              </button>
+              <span className="text-[#6C7A89]">/</span>
+              <span
+                className={`font-bold ${
+                  appMode === 'guided' ? 'text-[#00F5D4]' : 'text-[#FFE600]'
+                }`}
+              >
+                {appMode === 'guided'
+                  ? 'NEURAL COACH (GUIDED)'
+                  : 'FREEPLAY LAB (MANUAL)'}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {profile.baselineWpm && (
+                <span className="text-[11px] text-[#6C7A89]">
+                  BASELINE:{' '}
+                  <strong className="text-[#F2F5F8]">
+                    {profile.baselineWpm} WPM
+                  </strong>
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  soundEngine.playUiClick();
+                  const next = appMode === 'guided' ? 'freeplay' : 'guided';
+                  setAppMode(next);
+                  if (next === 'guided') {
+                    applyGuidedRecommendationForPassage(
+                      selectedPassage.id,
+                      profile,
+                      targetWpm
+                    );
+                  }
+                }}
+                className="px-2 py-0.5 bg-[#0D0618] border border-[#6C7A89]/50 text-[10px] text-[#F2F5F8] hover:border-[#00F5D4] hover:text-[#00F5D4] cursor-pointer"
+              >
+                SWITCH TO {appMode === 'guided' ? 'FREEPLAY' : 'GUIDED COACH'}
+              </button>
+            </div>
+          </div>
+
+          {calibrationCompletedBanner !== null && (
+            <div className="p-3.5 bg-[#00F5D4]/15 border-2 border-[#00F5D4] font-terminal text-xs flex items-center justify-between gap-3">
+              <div>
+                <div className="text-[#00F5D4] font-bold">
+                  ★ BASELINE CALIBRATION COMPLETE: {calibrationCompletedBanner}{' '}
+                  WPM
+                </div>
+                <div className="text-[#F2F5F8] text-[11px] mt-0.5">
+                  Your initial training velocity has been locked in. Select any
+                  passage or start Stage 1 below!
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCalibrationCompletedBanner(null)}
+                className="text-[#00F5D4] hover:text-[#F2F5F8] cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+
           {/* 1. Speed & Mode Configuration */}
           <ChamferedPanel
             variant="cyan"
             cutSize={12}
-            tag="STEP 01"
-            title="TRAINING MODE & SPEED"
+            tag={appMode === 'guided' ? 'COACH PRESCRIPTION' : 'STEP 01'}
+            title={
+              appMode === 'guided'
+                ? 'RECOMMENDED STAGE & SPEED (ADJUSTABLE)'
+                : 'TRAINING MODE & SPEED'
+            }
           >
             <div className="p-5 space-y-5">
+              {appMode === 'guided' &&
+                (() => {
+                  const rec = profile.passageRecords?.[selectedPassage.id];
+                  const stageNum = rec
+                    ? Math.min(3, rec.stageCompleted + 1)
+                    : 1;
+                  const isMastered = (rec?.stageCompleted || 0) >= 3;
+                  return (
+                    <div className="p-3 bg-[#0D0618] border border-[#00F5D4]/40 space-y-2">
+                      <div className="flex flex-wrap items-center justify-between gap-2 font-terminal text-xs">
+                        <span className="text-[#00F5D4] font-bold">
+                          {isMastered
+                            ? '★ PASSAGE MASTERED (OVERCLOCK TIER)'
+                            : `GUIDED STAGE ${stageNum} OF 3 // ${
+                                stageNum === 1
+                                  ? 'SEMANTIC CHUNK INTAKE'
+                                  : stageNum === 2
+                                  ? 'PERIPHERAL PACER (NO REGRESSION)'
+                                  : '4/3/2 TIME COMPRESSION OVERCLOCK'
+                              }`}
+                        </span>
+                        <span className="text-[11px] text-[#FFE600]">
+                          {rec && rec.attempts > 0
+                            ? `PASSAGE BEST: ${rec.bestEffectiveWpm} eWPM`
+                            : 'NEW PASSAGE (85% TRANSFER PACE)'}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-3 gap-1.5 font-terminal text-[10px]">
+                        <div
+                          className={`p-1.5 border text-center ${
+                            stageNum === 1 && !isMastered
+                              ? 'border-[#00F5D4] bg-[#00F5D4]/15 text-[#00F5D4] font-bold'
+                              : (rec?.stageCompleted || 0) >= 1
+                              ? 'border-[#00F5D4]/40 bg-[#180B29] text-[#00F5D4]'
+                              : 'border-[#6C7A89]/30 bg-[#0D0618] text-[#6C7A89]'
+                          }`}
+                        >
+                          {(rec?.stageCompleted || 0) >= 1 ? '✓ ' : ''}STAGE 1:
+                          CHUNK
+                        </div>
+                        <div
+                          className={`p-1.5 border text-center ${
+                            stageNum === 2 && !isMastered
+                              ? 'border-[#FFE600] bg-[#FFE600]/15 text-[#FFE600] font-bold'
+                              : (rec?.stageCompleted || 0) >= 2
+                              ? 'border-[#00F5D4]/40 bg-[#180B29] text-[#00F5D4]'
+                              : 'border-[#6C7A89]/30 bg-[#0D0618] text-[#6C7A89]'
+                          }`}
+                        >
+                          {(rec?.stageCompleted || 0) >= 2 ? '✓ ' : ''}STAGE 2:
+                          PACER
+                        </div>
+                        <div
+                          className={`p-1.5 border text-center ${
+                            stageNum === 3 || isMastered
+                              ? 'border-[#FF1E7A] bg-[#FF1E7A]/15 text-[#FF1E7A] font-bold'
+                              : 'border-[#6C7A89]/30 bg-[#0D0618] text-[#6C7A89]'
+                          }`}
+                        >
+                          {isMastered ? '★ MASTERED' : 'STAGE 3: 4/3/2'}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+
               {/* 4 Core Mode Selector Tabs */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                 {(Object.keys(MODE_INFO) as TrainingMode[]).map((modeKey) => {
@@ -902,7 +1473,9 @@ export function App() {
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div>
                     <div className="font-terminal text-xs text-[#6C7A89]">
-                      TARGET READING SPEED
+                      {appMode === 'guided'
+                        ? 'COACH TARGET WPM (MANUAL OVERRIDE ENABLED)'
+                        : 'TARGET READING SPEED'}
                     </div>
                     <div className="text-[11px] text-[#6C7A89] mt-0.5">
                       L2 Start: <span className="text-[#F2F5F8]">150</span> · Native Avg:{' '}
@@ -1548,11 +2121,16 @@ export function App() {
           SCREEN 4: SESSION RESULT & BENCHMARK REPORT
       ========================================================= */}
       {screen === 'result' && lastSessionMetrics && (
-        <main className="flex-1 max-w-2xl w-full mx-auto px-4 py-8 flex flex-col justify-center space-y-6">
+        <main className="flex-1 max-w-2xl w-full mx-auto px-4 py-8 flex flex-col justify-center space-y-5">
           {(() => {
             const benchmark = calculateHumanBenchmark(lastSessionMetrics);
-            const { nextWpm, status } = computeNextTargetWpm(
-              targetWpm,
+            const rawSessionWpm = Math.round(
+              lastSessionMetrics.syncRate > 0
+                ? lastSessionMetrics.effectiveWpm / lastSessionMetrics.syncRate
+                : targetWpm
+            );
+            const { status } = computeNextTargetWpm(
+              rawSessionWpm,
               lastSessionMetrics.syncRate,
               lastSessionMetrics.forwardFlowRate
             );
@@ -1560,9 +2138,90 @@ export function App() {
             const flowPercent = Math.round(
               lastSessionMetrics.forwardFlowRate * 100
             );
+            const rec = profile.passageRecords?.[selectedPassage.id];
+            const stageCompleted = rec?.stageCompleted || 0;
+            const nextGuidedStage: 1 | 2 | 3 =
+              stageCompleted === 0
+                ? 1
+                : stageCompleted === 1
+                ? 2
+                : 3;
 
             return (
               <>
+                {/* Celebratory Record-Breaker Banner */}
+                {(isNewPersonalBest || isNewPassageBest) && (
+                  <div
+                    className={`p-4 border-2 font-terminal flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                      isNewPersonalBest
+                        ? 'bg-[#FFE600]/15 border-[#FFE600] shadow-[0_0_28px_rgba(255,230,0,0.35)]'
+                        : 'bg-[#00F5D4]/15 border-[#00F5D4] shadow-[0_0_24px_rgba(0,245,212,0.3)]'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <Trophy
+                        className={`w-7 h-7 shrink-0 ${
+                          isNewPersonalBest
+                            ? 'text-[#FFE600]'
+                            : 'text-[#00F5D4]'
+                        }`}
+                      />
+                      <div>
+                        <div
+                          className={`text-sm sm:text-base font-extrabold tracking-wider ${
+                            isNewPersonalBest
+                              ? 'text-[#FFE600]'
+                              : 'text-[#00F5D4]'
+                          }`}
+                        >
+                          {isNewPersonalBest
+                            ? '★ OVERALL PERSONAL BEST BROKEN!!'
+                            : '★ NEW PASSAGE RECORD SET!'}
+                        </div>
+                        <div className="text-xs text-[#F2F5F8] mt-0.5">
+                          {previousPassageBest > 0
+                            ? `Passage record surged from ${previousPassageBest} → ${lastSessionMetrics.effectiveWpm} eWPM (+${
+                                lastSessionMetrics.effectiveWpm -
+                                previousPassageBest
+                              } eWPM)!`
+                            : `First verified record on "${selectedPassage.title}": ${lastSessionMetrics.effectiveWpm} eWPM!`}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Newly Unlocked Achievements Banner */}
+                {newlyUnlockedAchievements.length > 0 && (
+                  <div className="p-3.5 bg-[#FF1E7A]/15 border-2 border-[#FF1E7A] font-terminal text-xs space-y-1.5">
+                    <div className="text-[#FF1E7A] font-bold flex items-center gap-1.5">
+                      <Award className="w-4 h-4" />
+                      <span>ACHIEVEMENT UNLOCKED!</span>
+                    </div>
+                    {newlyUnlockedAchievements.map((achId) => {
+                      const def = ACHIEVEMENT_CATALOG.find(
+                        (a) => a.id === achId
+                      );
+                      if (!def) return null;
+                      return (
+                        <div
+                          key={achId}
+                          className="p-2 bg-[#0D0618] border border-[#FF1E7A]/50 flex items-center justify-between"
+                        >
+                          <div>
+                            <span className="text-[#FFE600] font-bold">
+                              [{def.badgeCode}] {def.title}
+                            </span>
+                            <span className="text-[#F2F5F8] ml-2">
+                              — {def.description}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
                 <ChamferedPanel
                   variant="cyan"
                   cutSize={12}
@@ -1589,21 +2248,20 @@ export function App() {
                           <div className="font-terminal text-xs text-[#FFE600] mt-1.5">
                             TOP {benchmark.topPercentile}% OF HUMAN READERS
                           </div>
-                          <div className="font-terminal text-[11px] mt-2 pt-2 border-t border-[#6C7A89]/30">
-                            {isNewPersonalBest ? (
-                              <span className="text-[#00F5D4] font-bold">
-                                ★ NEW PERSONAL BEST! ({profile.bestEffectiveWpm} eWPM)
-                              </span>
-                            ) : lastSessionMetrics.syncRate >=
-                              QUIZ_PASS_THRESHOLD ? (
-                              <span className="text-[#6C7A89]">
-                                QUIZ PASSED // BEST: {profile.bestEffectiveWpm} eWPM
-                              </span>
-                            ) : (
-                              <span className="text-[#FF1E7A]">
-                                QUIZ FAILED (&lt;67%) // RECORD NOT UPDATED
-                              </span>
-                            )}
+                          <div className="font-terminal text-[11px] mt-2 pt-2 border-t border-[#6C7A89]/30 space-y-0.5">
+                            <div>
+                              PASSAGE BEST:{' '}
+                              <strong className="text-[#00F5D4]">
+                                {rec?.bestEffectiveWpm || 0} eWPM
+                              </strong>{' '}
+                              · STAGE:{' '}
+                              <strong className="text-[#FFE600]">
+                                {stageCompleted}/3
+                              </strong>
+                            </div>
+                            <div className="text-[#6C7A89]">
+                              OVERALL BEST: {profile.bestEffectiveWpm} eWPM
+                            </div>
                           </div>
                         </div>
 
@@ -1613,7 +2271,7 @@ export function App() {
                               RAW WPM
                             </div>
                             <div className="text-sm font-bold text-[#F2F5F8] mt-0.5">
-                              {targetWpm}
+                              {rawSessionWpm}
                             </div>
                           </div>
                           <div className="p-2.5 bg-[#0D0618] border border-[#6C7A89]/30">
@@ -1641,50 +2299,122 @@ export function App() {
                       </div>
                     </div>
 
-                    {/* Concise 1-Line Bottleneck Diagnosis & Adaptive WPM */}
-                    <div className="p-3 bg-[#0D0618] border border-[#00F5D4]/30 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
-                      <span className="text-[#6C7A89]">
-                        {benchmark.diagnosisText}
-                      </span>
-                      <span className="font-terminal text-[#00F5D4] font-bold shrink-0">
-                        {status} → {nextWpm} WPM
-                      </span>
+                    {/* Interactive Next-Session Speed Adjuster (Auto-suggested + Manual Stepper) */}
+                    <div className="p-3.5 bg-[#0D0618] border border-[#00F5D4]/40 space-y-3">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                        <div>
+                          <div className="font-terminal text-[#00F5D4] font-bold">
+                            COACH RECOMMENDATION: {status}
+                          </div>
+                          <div className="text-[#6C7A89] text-[11px] mt-0.5">
+                            {benchmark.diagnosisText}
+                          </div>
+                        </div>
+
+                        {/* Manual Speed Adjuster right on the Result Screen */}
+                        <div className="flex items-center gap-1 font-terminal shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              soundEngine.playUiClick();
+                              setTargetWpm((w) => Math.max(60, w - 10));
+                            }}
+                            className="cyber-btn px-2 py-1 bg-[#180B29] border border-[#00F5D4]/60 text-xs text-[#00F5D4] font-bold"
+                          >
+                            -10
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              soundEngine.playUiClick();
+                              setTargetWpm((w) => Math.max(60, w - 1));
+                            }}
+                            className="cyber-btn px-2 py-1 bg-[#180B29] border border-[#6C7A89]/60 text-xs text-[#F2F5F8]"
+                          >
+                            -1
+                          </button>
+                          <div className="px-2.5 py-1 bg-[#180B29] border border-[#00F5D4] text-sm font-bold text-[#00F5D4] min-w-[86px] text-center">
+                            {targetWpm} WPM
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              soundEngine.playUiClick();
+                              setTargetWpm((w) => Math.min(900, w + 1));
+                            }}
+                            className="cyber-btn px-2 py-1 bg-[#180B29] border border-[#6C7A89]/60 text-xs text-[#F2F5F8]"
+                          >
+                            +1
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              soundEngine.playUiClick();
+                              setTargetWpm((w) => Math.min(900, w + 10));
+                            }}
+                            className="cyber-btn px-2 py-1 bg-[#180B29] border border-[#00F5D4]/60 text-xs text-[#00F5D4] font-bold"
+                          >
+                            +10
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </ChamferedPanel>
 
-                {/* Primary Actions */}
+                {/* Primary Actions: Advance Guided Stage on Same Passage OR Switch Passage */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <button
                     type="button"
                     onClick={() => {
                       soundEngine.playUiClick();
-                      setTargetWpm(nextWpm);
+                      if (appMode === 'guided') {
+                        if (nextGuidedStage === 1) {
+                          setSelectedMode('chunk_pacer');
+                          setFadeOutPassed(false);
+                        } else if (nextGuidedStage === 2) {
+                          setSelectedMode('chunk_pacer');
+                          setFadeOutPassed(true);
+                        } else {
+                          setSelectedMode('overclock_432');
+                          setFadeOutPassed(true);
+                        }
+                      }
                       startReadingSession();
                     }}
-                    className="cyber-btn py-3.5 px-4 bg-[#180B29] border border-[#00F5D4] text-[#00F5D4] font-bold text-sm flex items-center justify-center gap-2 hover:bg-[#00F5D4]/15"
+                    className="cyber-btn py-3.5 px-4 bg-[#00F5D4] text-[#0D0618] font-bold text-xs sm:text-sm flex items-center justify-center gap-2 hover:brightness-110 shadow-[0_0_20px_rgba(0,245,212,0.3)]"
                   >
                     <RotateCcw className="w-4 h-4" />
-                    <span>RETRY ({nextWpm} WPM)</span>
+                    <span>
+                      {appMode === 'guided'
+                        ? stageCompleted >= 3
+                          ? `OVERCLOCK AGAIN (${targetWpm} WPM)`
+                          : `START STAGE ${nextGuidedStage}: ${
+                              nextGuidedStage === 1
+                                ? 'CHUNK'
+                                : nextGuidedStage === 2
+                                ? 'PACER'
+                                : '4/3/2 OVERCLOCK'
+                            } (${targetWpm} WPM)`
+                        : `TRAIN SAME PASSAGE (${targetWpm} WPM)`}
+                    </span>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => {
                       soundEngine.playUiClick();
-                      setTargetWpm(nextWpm);
-                      const currentIdx = allPassages.findIndex(
-                        (p) => p.id === selectedPassage.id
-                      );
-                      const nextPassage =
-                        allPassages[(currentIdx + 1) % allPassages.length];
-                      setSelectedPassageId(nextPassage.id);
                       setScreen('home');
+                      setShowPassageModal(true);
                     }}
-                    className="cyber-btn py-3.5 px-4 bg-[#00F5D4] text-[#0D0618] font-bold text-sm flex items-center justify-center gap-2 hover:brightness-110"
+                    className="cyber-btn py-3.5 px-4 bg-[#180B29] border border-[#FFE600] text-[#FFE600] font-bold text-xs sm:text-sm flex items-center justify-center gap-2 hover:bg-[#FFE600]/15"
                   >
-                    <span>NEXT SESSION ({nextWpm} WPM)</span>
-                    <ChevronRight className="w-4 h-4" />
+                    <BookOpen className="w-4 h-4" />
+                    <span>
+                      {stageCompleted >= 3
+                        ? 'PASSAGE MASTERED! → PICK NEW PASSAGE (85% WPM)'
+                        : 'SWITCH PASSAGE (85% ON UNSEEN)'}
+                    </span>
                   </button>
                 </div>
               </>
@@ -1754,18 +2484,23 @@ export function App() {
                   </button>
                 </div>
 
-                {/* Tab 1: Preset & Saved Library */}
+                {/* Tab 1: Preset & Saved Library with Play History & Speed Badges */}
                 {passageModalTab === 'presets' && (
                   <div className="space-y-2 max-h-[58vh] overflow-y-auto pr-1">
                     {allPassages.map((passage, idx) => {
                       const isSelected = passage.id === selectedPassage.id;
+                      const rec = profile.passageRecords?.[passage.id];
+                      const hasPlayed = Boolean(rec && rec.attempts > 0);
+                      const stage = rec?.stageCompleted || 0;
+                      const bestEwpm = rec?.bestEffectiveWpm || 0;
+
                       return (
                         <button
                           key={passage.id}
                           type="button"
                           onClick={() => {
                             soundEngine.playUiClick();
-                            setSelectedPassageId(passage.id);
+                            selectPassageWithCoaching(passage.id);
                             setShowPassageModal(false);
                           }}
                           className={`cyber-btn w-full p-3.5 border text-left transition-all ${
@@ -1774,14 +2509,38 @@ export function App() {
                               : 'bg-[#0D0618] border-[#6C7A89]/40 text-[#6C7A89] hover:border-[#00F5D4]/60 hover:text-[#F2F5F8]'
                           }`}
                         >
-                          <div className="flex items-center justify-between font-terminal text-xs">
+                          <div className="flex flex-wrap items-center justify-between gap-2 font-terminal text-xs">
                             <span className="text-[#00F5D4] font-bold">
                               {String(idx + 1).padStart(2, '0')} //{' '}
                               {passage.category}
                             </span>
-                            <span className="text-[#FFE600]">
-                              {passage.wordCount} words
-                            </span>
+
+                            <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
+                              {stage >= 3 ? (
+                                <span className="px-1.5 py-0.5 bg-[#FF1E7A]/20 border border-[#FF1E7A] text-[#FF1E7A] font-bold">
+                                  ★ MASTERED (3/3)
+                                </span>
+                              ) : hasPlayed ? (
+                                <span className="px-1.5 py-0.5 bg-[#00F5D4]/15 border border-[#00F5D4]/60 text-[#00F5D4] font-bold">
+                                  STAGE {stage}/3 · {rec?.attempts} RUN
+                                  {(rec?.attempts || 0) > 1 ? 'S' : ''}
+                                </span>
+                              ) : (
+                                <span className="px-1.5 py-0.5 bg-[#180B29] border border-[#6C7A89]/40 text-[#6C7A89]">
+                                  UNREAD (85% PACE)
+                                </span>
+                              )}
+
+                              {bestEwpm > 0 && (
+                                <span className="px-1.5 py-0.5 bg-[#FFE600]/15 border border-[#FFE600] text-[#FFE600] font-bold">
+                                  BEST: {bestEwpm} eWPM
+                                </span>
+                              )}
+
+                              <span className="text-[#6C7A89]">
+                                {passage.wordCount}w
+                              </span>
+                            </div>
                           </div>
                           <div className="text-sm font-semibold text-[#F2F5F8] mt-1">
                             {passage.title}
@@ -2476,6 +3235,122 @@ export function App() {
                       )}
                     </div>
                   )}
+                </div>
+              </div>
+            </ChamferedPanel>
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================
+          MODAL 4: NEURAL ACHIEVEMENTS & BADGES (Secondary Hierarchy)
+      ========================================================= */}
+      {showAchievementsModal && (
+        <div className="fixed inset-0 z-50 bg-[#0D0618]/85 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="max-w-xl w-full">
+            <ChamferedPanel
+              variant="yellow"
+              cutSize={12}
+              tag="MILESTONES"
+              title={`NEURAL ACHIEVEMENTS (${
+                profile.unlockedAchievements?.length || 0
+              }/${ACHIEVEMENT_CATALOG.length})`}
+              rightSlot={
+                <button
+                  type="button"
+                  onClick={() => setShowAchievementsModal(false)}
+                  className="text-[#6C7A89] hover:text-[#F2F5F8] cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              }
+            >
+              <div className="p-4 space-y-3 max-h-[75vh] overflow-y-auto font-terminal text-xs">
+                <div className="grid grid-cols-3 gap-2 text-center">
+                  <div className="p-2.5 bg-[#0D0618] border border-[#00F5D4]/30">
+                    <div className="text-[10px] text-[#6C7A89]">BASELINE</div>
+                    <div className="text-sm font-bold text-[#00F5D4]">
+                      {profile.baselineWpm
+                        ? `${profile.baselineWpm} WPM`
+                        : 'UNSET'}
+                    </div>
+                  </div>
+                  <div className="p-2.5 bg-[#0D0618] border border-[#FFE600]/30">
+                    <div className="text-[10px] text-[#6C7A89]">
+                      OVERALL BEST
+                    </div>
+                    <div className="text-sm font-bold text-[#FFE600]">
+                      {profile.bestEffectiveWpm} eWPM
+                    </div>
+                  </div>
+                  <div className="p-2.5 bg-[#0D0618] border border-[#FF1E7A]/30">
+                    <div className="text-[10px] text-[#6C7A89]">
+                      PASSAGES MASTERED
+                    </div>
+                    <div className="text-sm font-bold text-[#FF1E7A]">
+                      {
+                        Object.values(profile.passageRecords || {}).filter(
+                          (r) => r.stageCompleted >= 3
+                        ).length
+                      }
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  {ACHIEVEMENT_CATALOG.map((ach) => {
+                    const isUnlocked = Boolean(
+                      profile.unlockedAchievements?.includes(ach.id)
+                    );
+                    return (
+                      <div
+                        key={ach.id}
+                        className={`p-3 border flex items-start justify-between gap-3 ${
+                          isUnlocked
+                            ? 'bg-[#FFE600]/10 border-[#FFE600] text-[#F2F5F8]'
+                            : 'bg-[#0D0618] border-[#6C7A89]/30 text-[#6C7A89] opacity-65'
+                        }`}
+                      >
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={`px-1.5 py-0.5 text-[10px] border font-bold ${
+                                isUnlocked
+                                  ? 'border-[#FFE600] bg-[#FFE600] text-[#0D0618]'
+                                  : 'border-[#6C7A89]/40 bg-[#180B29] text-[#6C7A89]'
+                              }`}
+                            >
+                              {ach.badgeCode}
+                            </span>
+                            <span
+                              className={`font-bold ${
+                                isUnlocked ? 'text-[#FFE600]' : 'text-[#6C7A89]'
+                              }`}
+                            >
+                              {ach.title}
+                            </span>
+                            <span className="text-[10px] text-[#00F5D4]">
+                              // {ach.subtitle}
+                            </span>
+                          </div>
+                          <p className="text-[11px] leading-relaxed">
+                            {ach.description}
+                          </p>
+                        </div>
+                        <div className="shrink-0">
+                          {isUnlocked ? (
+                            <span className="px-2 py-0.5 bg-[#00F5D4]/20 border border-[#00F5D4] text-[#00F5D4] text-[10px] font-bold">
+                              UNLOCKED
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 bg-[#180B29] border border-[#6C7A89]/40 text-[#6C7A89] text-[10px]">
+                              LOCKED
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             </ChamferedPanel>

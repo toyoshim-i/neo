@@ -1,14 +1,17 @@
 import React from 'react';
-import { Volume2, VolumeX, Cpu, Settings, BarChart2 } from 'lucide-react';
+import { Volume2, VolumeX, Cpu, Settings, BarChart2, Award } from 'lucide-react';
 import { soundEngine } from '../../lib/soundEngine';
 
 interface CyberHeaderProps {
   currentStepLabel: string;
   muted: boolean;
   sessionCount: number;
+  achievementCount?: number;
+  totalAchievements?: number;
   onToggleMute: () => void;
   onOpenHistory: () => void;
   onOpenSettings: () => void;
+  onOpenAchievements?: () => void;
   onGoHome?: () => void;
 }
 
@@ -16,9 +19,12 @@ export const CyberHeader: React.FC<CyberHeaderProps> = ({
   currentStepLabel,
   muted,
   sessionCount,
+  achievementCount = 0,
+  totalAchievements = 6,
   onToggleMute,
   onOpenHistory,
   onOpenSettings,
+  onOpenAchievements,
   onGoHome,
 }) => {
   return (
@@ -50,6 +56,24 @@ export const CyberHeader: React.FC<CyberHeaderProps> = ({
 
         {/* Right: Minimal Utility Controls */}
         <div className="flex items-center gap-2 font-terminal text-xs">
+          {onOpenAchievements && (
+            <button
+              type="button"
+              onClick={() => {
+                soundEngine.playUiClick();
+                onOpenAchievements();
+              }}
+              title="Neural Achievements & Badges"
+              className="cyber-btn px-2.5 py-1.5 border border-[#FFE600]/60 bg-[#0D0618] text-[#FFE600] hover:bg-[#FFE600]/15 flex items-center gap-1.5"
+            >
+              <Award className="w-3.5 h-3.5 text-[#FFE600]" />
+              <span className="hidden sm:inline">BADGES</span>
+              <span className="text-[10px] px-1 bg-[#FFE600]/20 text-[#FFE600] font-bold">
+                {achievementCount}/{totalAchievements}
+              </span>
+            </button>
+          )}
+
           <button
             type="button"
             onClick={() => {

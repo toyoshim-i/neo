@@ -13,6 +13,24 @@ export type TrainingMode =
   | 'overclock_432'
   | 'tachistoscope';
 
+export type AchievementId =
+  | 'NEURAL_CALIBRATED'
+  | 'SUBVOCAL_BREAKER'
+  | 'NATIVE_HORIZON'
+  | 'OVERCLOCK_MASTER'
+  | 'RENAISSANCE_SYNAPSE'
+  | 'HYPER_SACCADE';
+
+export interface PassageProgress {
+  passageId: string;
+  bestEffectiveWpm: number;
+  bestRawWpm: number;
+  lastTargetWpm: number;
+  stageCompleted: 0 | 1 | 2 | 3; // 0=Unread, 1=Stage1(Chunk), 2=Stage2(Pacer), 3=Mastered(Overclock)
+  attempts: number;
+  updatedAt: number;
+}
+
 export interface QuizQuestion {
   id: string;
   code: string;           // e.g., "BIO-EV-01", "SYNAPSE-02"
@@ -52,11 +70,14 @@ export interface SessionLog {
 
 export interface UserProfile {
   id: 'default';
+  baselineWpm?: number;    // Initial self-paced calibration WPM
   currentTargetWpm: number;
   bestEffectiveWpm: number;
   totalWordsRead: number;
   streakDays: number;
   lastActiveDate: string;  // YYYY-MM-DD
+  unlockedAchievements?: AchievementId[];
+  passageRecords?: Record<string, PassageProgress>;
   llmEndpoint: string;     // e.g., "http://localhost:11434"
   llmModel: string;        // e.g., "gemma2:2b"
   syncEndpoint?: string;   // Optional remote sync URL

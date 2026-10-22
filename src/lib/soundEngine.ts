@@ -339,6 +339,52 @@ class SoundEngine {
     osc.start(now);
     osc.stop(now + 0.016);
   }
+
+  /**
+   * 自己ベスト更新・マスター達成時のド派手なFMシンセ・ジャックポット・ファンファーレ
+   */
+  public playRecordBreakerFanfare(): void {
+    const ctx = this.getContext();
+    if (!ctx) return;
+
+    const now = ctx.currentTime;
+    // Triumphal ascending synth brass fanfare (C5 -> E5 -> G5 -> B5 -> C6 -> E6 -> G6)
+    const fanfareNotes = [
+      { freq: 523.25, offset: 0.0, dur: 0.11 },
+      { freq: 659.25, offset: 0.08, dur: 0.11 },
+      { freq: 783.99, offset: 0.16, dur: 0.11 },
+      { freq: 987.77, offset: 0.24, dur: 0.14 },
+      { freq: 1046.5, offset: 0.34, dur: 0.18 },
+      { freq: 1318.51, offset: 0.44, dur: 0.22 },
+      { freq: 1567.98, offset: 0.54, dur: 0.55 },
+    ];
+
+    fanfareNotes.forEach(({ freq, offset, dur }) => {
+      const start = now + offset;
+      const osc = ctx.createOscillator();
+      const sub = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(freq, start);
+
+      sub.type = 'square';
+      sub.frequency.setValueAtTime(freq * 0.5, start);
+
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.linearRampToValueAtTime(0.24 * this.masterVolume, start + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + dur);
+
+      osc.connect(gain);
+      sub.connect(gain);
+      gain.connect(ctx.destination);
+
+      osc.start(start);
+      sub.start(start);
+      osc.stop(start + dur + 0.02);
+      sub.stop(start + dur + 0.02);
+    });
+  }
 }
 
 export const soundEngine = new SoundEngine();

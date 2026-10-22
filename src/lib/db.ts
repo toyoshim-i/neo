@@ -1,5 +1,70 @@
 import Dexie, { Table } from 'dexie';
-import { SessionLog, UserProfile, TrainingPassage } from '../types/schema';
+import {
+  SessionLog,
+  UserProfile,
+  TrainingPassage,
+  AchievementId,
+  PassageProgress,
+} from '../types/schema';
+
+export interface AchievementDefinition {
+  id: AchievementId;
+  title: string;
+  subtitle: string;
+  description: string;
+  badgeCode: string;
+}
+
+export const ACHIEVEMENT_CATALOG: readonly AchievementDefinition[] = [
+  {
+    id: 'NEURAL_CALIBRATED',
+    title: 'NEURAL CALIBRATED',
+    subtitle: 'Baseline Established',
+    description:
+      'Complete the self-paced baseline calibration to measure your natural reading speed.',
+    badgeCode: 'CAL-01',
+  },
+  {
+    id: 'SUBVOCAL_BREAKER',
+    title: 'SUBVOCAL BARRIER BROKEN',
+    subtitle: '250+ eWPM Verified',
+    description:
+      'Pass a comprehension quiz with an effective reading speed of 250 eWPM or higher, surpassing vocal speech limits.',
+    badgeCode: 'SVB-02',
+  },
+  {
+    id: 'NATIVE_HORIZON',
+    title: 'NATIVE HORIZON',
+    subtitle: '238+ eWPM on Unseen Text',
+    description:
+      'Pass a comprehension quiz at 238+ eWPM on your very first attempt on a new passage.',
+    badgeCode: 'NAT-03',
+  },
+  {
+    id: 'OVERCLOCK_MASTER',
+    title: 'OVERCLOCK MASTER',
+    subtitle: '3-Stage Passage Mastery',
+    description:
+      'Complete all 3 guided training stages (Chunk -> Pacer -> Overclock) on any passage.',
+    badgeCode: 'OVC-04',
+  },
+  {
+    id: 'RENAISSANCE_SYNAPSE',
+    title: 'RENAISSANCE SYNAPSE',
+    subtitle: 'Cross-Domain Polymath',
+    description:
+      'Pass comprehension quizzes across 3 or more distinct subject categories (e.g., Science, Tech, Arts).',
+    badgeCode: 'REN-05',
+  },
+  {
+    id: 'HYPER_SACCADE',
+    title: 'HYPER-SACCADE',
+    subtitle: '350+ eWPM Elite',
+    description:
+      'Reach the elite 350+ eWPM visual intake tier with verified comprehension.',
+    badgeCode: 'HYP-06',
+  },
+];
 
 class WetwareDatabase extends Dexie {
   sessions!: Table<SessionLog, string>;
@@ -50,6 +115,8 @@ export const DEFAULT_PROFILE: UserProfile = {
   totalWordsRead: 0,
   streakDays: 1,
   lastActiveDate: new Date().toISOString().slice(0, 10),
+  unlockedAchievements: [],
+  passageRecords: {},
   llmEndpoint: 'http://localhost:11434',
   llmModel: 'gemma2:2b',
 };
@@ -80,6 +147,8 @@ export async function getOrInitProfile(): Promise<UserProfile> {
       ...existing,
       currentTargetWpm: migratedTargetWpm,
       bestEffectiveWpm: verifiedBest,
+      unlockedAchievements: existing.unlockedAchievements || [],
+      passageRecords: existing.passageRecords || {},
     };
     await db.profiles.put(normalized);
     if (typeof window !== 'undefined' && !savedWpm) {
@@ -95,28 +164,168 @@ export async function getOrInitProfile(): Promise<UserProfile> {
   return DEFAULT_PROFILE;
 }
 
+export async function saveCalibrationBaseline(
+  baselineWpm: number
+): Promise<{
+  profile: UserProfile;
+  newlyUnlocked: AchievementId[];
+}> {
+  const clamped = Math.max(80, Math.min(600, Math.round(baselineWpm)));
+  const profile = await getOrInitProfile();
+  const unlocked = new Set<AchievementId>(profile.unlockedAchievements || []);
+  const newlyUnlocked: AchievementId[] = [];
+
+  if (!unlocked.has('NEURAL_CALIBRATED')) {
+    unlocked.add('NEURAL_CALIBRATED');
+    newlyUnlocked.push('NEURAL_CALIBRATED');
+  }
+
+  const updated: UserProfile = {
+    ...profile,
+    baselineWpm: clamped,
+    currentTargetWpm: clamped,
+    unlockedAchievements: Array.from(unlocked),
+  };
+
+  saveTargetWpmPreference(clamped);
+  await db.profiles.put(updated);
+  return { profile: updated, newlyUnlocked };
+}
+
 export async function recordSessionAndUpdateProfile(
   session: SessionLog,
   wordsRead: number,
-  selectedTargetWpm: number
-): Promise<UserProfile> {
+  selectedTargetWpm: number,
+  passageCategory?: string
+): Promise<{
+  profile: UserProfile;
+  isNewOverallBest: boolean;
+  isNewPassageBest: boolean;
+  previousPassageBest: number;
+  updatedPassageRecord: PassageProgress;
+  newlyUnlocked: AchievementId[];
+}> {
   await db.sessions.put(session);
   const profile = await getOrInitProfile();
   const today = new Date().toISOString().slice(0, 10);
   const quizPassed = session.syncRate >= QUIZ_PASS_THRESHOLD;
 
+  const isCalibration = session.passageId === 'calibration-baseline-probe';
+  const records: Record<string, PassageProgress> = {
+    ...(profile.passageRecords || {}),
+  };
+
+  const prevRecord: PassageProgress = records[session.passageId] || {
+    passageId: session.passageId,
+    bestEffectiveWpm: 0,
+    bestRawWpm: 0,
+    lastTargetWpm: selectedTargetWpm,
+    stageCompleted: 0,
+    attempts: 0,
+    updatedAt: Date.now(),
+  };
+
+  const wasFirstAttemptOnPassage = prevRecord.attempts === 0;
+  const previousPassageBest = prevRecord.bestEffectiveWpm;
+  const isNewPassageBest =
+    !isCalibration &&
+    quizPassed &&
+    session.effectiveWpm > prevRecord.bestEffectiveWpm;
+  const isNewOverallBest =
+    !isCalibration &&
+    quizPassed &&
+    session.effectiveWpm > profile.bestEffectiveWpm;
+
+  const nextStageCompleted: 0 | 1 | 2 | 3 = !isCalibration && quizPassed
+    ? (Math.min(3, prevRecord.stageCompleted + 1) as 0 | 1 | 2 | 3)
+    : prevRecord.stageCompleted;
+
+  const updatedPassageRecord: PassageProgress = {
+    passageId: session.passageId,
+    bestEffectiveWpm:
+      !isCalibration && quizPassed
+        ? Math.max(prevRecord.bestEffectiveWpm, session.effectiveWpm)
+        : prevRecord.bestEffectiveWpm,
+    bestRawWpm:
+      !isCalibration && quizPassed
+        ? Math.max(prevRecord.bestRawWpm, session.rawWpm)
+        : prevRecord.bestRawWpm,
+    lastTargetWpm: selectedTargetWpm,
+    stageCompleted: nextStageCompleted,
+    attempts: prevRecord.attempts + 1,
+    updatedAt: Date.now(),
+  };
+
+  if (!isCalibration) {
+    records[session.passageId] = updatedPassageRecord;
+  }
+
+  // Evaluate Achievements
+  const unlocked = new Set<AchievementId>(profile.unlockedAchievements || []);
+  const newlyUnlocked: AchievementId[] = [];
+  const grant = (id: AchievementId) => {
+    if (!unlocked.has(id)) {
+      unlocked.add(id);
+      newlyUnlocked.push(id);
+    }
+  };
+
+  if (isCalibration) {
+    grant('NEURAL_CALIBRATED');
+  }
+  if (quizPassed && session.effectiveWpm >= 250) {
+    grant('SUBVOCAL_BREAKER');
+  }
+  if (
+    !isCalibration &&
+    wasFirstAttemptOnPassage &&
+    quizPassed &&
+    session.effectiveWpm >= 238
+  ) {
+    grant('NATIVE_HORIZON');
+  }
+  if (!isCalibration && nextStageCompleted >= 3) {
+    grant('OVERCLOCK_MASTER');
+  }
+  if (quizPassed && session.effectiveWpm >= 350) {
+    grant('HYPER_SACCADE');
+  }
+
+  // Check cross-domain categories (RENAISSANCE_SYNAPSE)
+  if (quizPassed && !unlocked.has('RENAISSANCE_SYNAPSE')) {
+    const allSessions = await db.sessions.toArray();
+    const passedIds = new Set(
+      allSessions
+        .filter((s) => s.syncRate >= QUIZ_PASS_THRESHOLD)
+        .map((s) => s.passageId)
+    );
+    if (passedIds.size >= 3 || (passageCategory && passedIds.size >= 3)) {
+      grant('RENAISSANCE_SYNAPSE');
+    }
+  }
+
   const updated: UserProfile = {
     ...profile,
     currentTargetWpm: selectedTargetWpm,
-    bestEffectiveWpm: quizPassed
-      ? Math.max(profile.bestEffectiveWpm, session.effectiveWpm)
-      : profile.bestEffectiveWpm,
+    bestEffectiveWpm:
+      !isCalibration && quizPassed
+        ? Math.max(profile.bestEffectiveWpm, session.effectiveWpm)
+        : profile.bestEffectiveWpm,
     totalWordsRead: profile.totalWordsRead + wordsRead,
     lastActiveDate: today,
+    unlockedAchievements: Array.from(unlocked),
+    passageRecords: records,
   };
 
   await db.profiles.put(updated);
-  return updated;
+  return {
+    profile: updated,
+    isNewOverallBest,
+    isNewPassageBest,
+    previousPassageBest,
+    updatedPassageRecord,
+    newlyUnlocked,
+  };
 }
 
 export async function exportDatabaseJson(): Promise<string> {
