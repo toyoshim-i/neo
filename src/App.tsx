@@ -183,6 +183,7 @@ export function App() {
   const [totalSteps, setTotalSteps] = useState<number>(0);
   const [sessionResetKey, setSessionResetKey] = useState<number>(0);
   const [lexiconPopup, setLexiconPopup] = useState<{
+    chunkIdx: number;
     chunkText: string;
     activeQuery: string;
     words: string[];
@@ -191,6 +192,9 @@ export function App() {
     source?: 'webllm' | 'ollama' | 'cloud_dict';
     loading: boolean;
     error?: string;
+    anchorX: number;
+    anchorTop: number;
+    anchorBottom: number;
   } | null>(null);
 
   // Active Quiz State (1 question at a time)
@@ -300,7 +304,12 @@ export function App() {
 
   // Translate a tapped chunk or individual word into the user's configured target language
   const handleTranslateChunkOrWord = useCallback(
-    async (queryText: string, chunkIdx: number, baseChunkText?: string) => {
+    async (
+      queryText: string,
+      chunkIdx: number,
+      baseChunkText?: string,
+      anchorRect?: { x: number; top: number; bottom: number }
+    ) => {
       soundEngine.playUiClick();
       setIsPlaying(false);
 
@@ -320,14 +329,27 @@ export function App() {
       const end = Math.min(selectedPassage.chunks.length, chunkIdx + 3);
       const contextSentence = selectedPassage.chunks.slice(start, end).join(' ');
 
-      setLexiconPopup({
+      setLexiconPopup((prev) => ({
+        chunkIdx,
         chunkText: chunkStr,
         activeQuery: queryText,
         words,
         contextSentence,
         translation: '',
         loading: true,
-      });
+        anchorX:
+          anchorRect?.x ??
+          prev?.anchorX ??
+          (typeof window !== 'undefined' ? window.innerWidth / 2 : 200),
+        anchorTop:
+          anchorRect?.top ??
+          prev?.anchorTop ??
+          (typeof window !== 'undefined' ? window.innerHeight / 2 - 20 : 200),
+        anchorBottom:
+          anchorRect?.bottom ??
+          prev?.anchorBottom ??
+          (typeof window !== 'undefined' ? window.innerHeight / 2 + 20 : 240),
+      }));
 
       try {
         const res = await translateSelection({
@@ -528,7 +550,12 @@ export function App() {
       if (e.code === 'Space') {
         e.preventDefault();
         soundEngine.playUiClick();
-        setIsPlaying((p) => !p);
+        setIsPlaying((p) => {
+          if (!p) setLexiconPopup(null);
+          return !p;
+        });
+      } else if (e.code === 'Escape') {
+        setLexiconPopup(null);
       } else if (e.code === 'ArrowRight') {
         e.preventDefault();
         if (activeChunkIndex < selectedPassage.chunks.length - 1) {
@@ -1139,7 +1166,10 @@ export function App() {
                     type="button"
                     onClick={() => {
                       soundEngine.playUiClick();
-                      setIsPlaying((p) => !p);
+                      setIsPlaying((p) => {
+                        if (!p) setLexiconPopup(null);
+                        return !p;
+                      });
                     }}
                     className="cyber-btn px-3 py-1 bg-[#00F5D4] text-[#0D0618] font-bold flex items-center gap-1"
                   >
@@ -1202,12 +1232,19 @@ export function App() {
                   </div>
                   <button
                     type="button"
-                    onClick={() =>
-                      handleTranslateChunkOrWord(
+                    onClick={(e) => {
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      void handleTranslateChunkOrWord(
                         selectedPassage.chunks[activeChunkIndex] || '',
-                        activeChunkIndex
-                      )
-                    }
+                        activeChunkIndex,
+                        selectedPassage.chunks[activeChunkIndex] || '',
+                        {
+                          x: rect.left + rect.width / 2,
+                          top: rect.top,
+                          bottom: rect.bottom,
+                        }
+                      );
+                    }}
                     className="cyber-btn px-3 py-1 bg-[#0D0618] border border-[#00F5D4]/50 text-[#00F5D4] font-terminal text-xs flex items-center gap-1.5 hover:bg-[#00F5D4]/15"
                   >
                     <Languages className="w-3.5 h-3.5" />
@@ -1225,12 +1262,18 @@ export function App() {
                     return (
                       <span key={idx}>
                         <span
-                          onClick={() => {
+                          onClick={(e) => {
+                            const rect =
+                              e.currentTarget.getBoundingClientRect();
                             if (idx < activeChunkIndex) {
                               setRegressionCount((r) => r + 1);
                             }
                             setActiveChunkIndex(idx);
-                            void handleTranslateChunkOrWord(chunk, idx, chunk);
+                            void handleTranslateChunkOrWord(chunk, idx, chunk, {
+                              x: rect.left + rect.width / 2,
+                              top: rect.top,
+                              bottom: rect.bottom,
+                            });
                           }}
                           title="Tap to pause & translate"
                           style={{
@@ -1254,102 +1297,131 @@ export function App() {
             </ChamferedPanel>
           )}
 
-          {/* Neural Lexicon Bar (Tap-to-Translate Phrase or Individual Word) */}
-          {selectedMode !== 'tachistoscope' && lexiconPopup && (
-            <div className="p-3.5 bg-[#180B29] border border-[#FFE600]/60 font-terminal text-xs space-y-2">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <span className="text-[#FFE600] font-bold flex items-center gap-1">
-                    <Languages className="w-3.5 h-3.5" />
-                    <span>LEXICON ({translationLang.toUpperCase()}):</span>
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      handleTranslateChunkOrWord(
-                        lexiconPopup.chunkText,
-                        activeChunkIndex,
-                        lexiconPopup.chunkText
-                      )
-                    }
-                    className={`px-2 py-0.5 border cursor-pointer ${
-                      lexiconPopup.activeQuery === lexiconPopup.chunkText
-                        ? 'border-[#00F5D4] bg-[#00F5D4]/20 text-[#00F5F8] font-bold'
-                        : 'border-[#6C7A89]/40 bg-[#0D0618] text-[#6C7A89] hover:text-[#F2F5F8]'
-                    }`}
-                  >
-                    PHRASE: &ldquo;{lexiconPopup.chunkText}&rdquo;
-                  </button>
-                  {lexiconPopup.words.map((w) => (
-                    <button
-                      key={w}
-                      type="button"
-                      onClick={() =>
-                        handleTranslateChunkOrWord(
-                          w,
-                          activeChunkIndex,
-                          lexiconPopup.chunkText
-                        )
-                      }
-                      className={`px-2 py-0.5 border cursor-pointer ${
-                        lexiconPopup.activeQuery === w
-                          ? 'border-[#FFE600] bg-[#FFE600]/20 text-[#FFE600] font-bold'
-                          : 'border-[#6C7A89]/40 bg-[#0D0618] text-[#F2F5F8] hover:border-[#FFE600]/60'
-                      }`}
-                    >
-                      {w}
-                    </button>
-                  ))}
-                </div>
+          {/* Floating Near-Chunk Lexicon Popover (Tap-to-Translate Overlay) */}
+          {selectedMode !== 'tachistoscope' &&
+            lexiconPopup &&
+            (() => {
+              const vw =
+                typeof window !== 'undefined' ? window.innerWidth : 400;
+              const vh =
+                typeof window !== 'undefined' ? window.innerHeight : 750;
+              const popWidth = Math.min(340, vw - 24);
+              const halfW = popWidth / 2;
+              const clampedLeft = Math.max(
+                12 + halfW,
+                Math.min(vw - 12 - halfW, lexiconPopup.anchorX)
+              );
+              // Prefer placing right below the tapped chunk unless near the bottom of screen
+              const placeAbove = lexiconPopup.anchorBottom + 170 > vh;
+              const topStyle = placeAbove
+                ? Math.max(12, lexiconPopup.anchorTop - 12)
+                : lexiconPopup.anchorBottom + 8;
 
-                <div className="flex items-center gap-2">
-                  {lexiconPopup.source && (
-                    <span className="text-[10px] px-1.5 py-0.5 bg-[#0D0618] border border-[#00F5D4]/40 text-[#00F5D4]">
-                      {lexiconPopup.source.toUpperCase()}
-                    </span>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => setLexiconPopup(null)}
-                    className="text-[#6C7A89] hover:text-[#F2F5F8] cursor-pointer"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-
-              <div className="p-2.5 bg-[#0D0618] border border-[#00F5D4]/30 text-sm text-[#F2F5F8] flex items-center justify-between gap-3">
-                {lexiconPopup.loading ? (
-                  <span className="text-[#00F5D4] text-xs flex items-center gap-1.5">
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    <span>
-                      Translating &ldquo;{lexiconPopup.activeQuery}&rdquo;...
-                    </span>
-                  </span>
-                ) : lexiconPopup.error ? (
-                  <span className="text-[#FF1E7A] text-xs">
-                    {lexiconPopup.error}
-                  </span>
-                ) : (
-                  <span className="font-bold text-[#00F5D4]">
-                    {lexiconPopup.translation}
-                  </span>
-                )}
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    soundEngine.playUiClick();
-                    setLexiconPopup(null);
-                    setIsPlaying(true);
+              return (
+                <div
+                  style={{
+                    position: 'fixed',
+                    left: `${clampedLeft}px`,
+                    top: `${topStyle}px`,
+                    width: `${popWidth}px`,
+                    transform: placeAbove
+                      ? 'translate(-50%, -100%)'
+                      : 'translate(-50%, 0)',
                   }}
-                  className="cyber-btn px-2.5 py-1 bg-[#00F5D4] text-[#0D0618] font-bold text-[11px] shrink-0"
+                  className="z-50 p-3 bg-[#0D0618]/95 backdrop-blur-md border-2 border-[#00F5D4] shadow-[0_8px_32px_rgba(0,0,0,0.85),0_0_18px_rgba(0,245,212,0.3)] font-terminal text-xs space-y-2"
                 >
-                  RESUME
-                </button>
-              </div>
-            </div>
-          )}
+                  {/* Popover Header: Phrase + Word Pills + Close */}
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex flex-wrap items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          void handleTranslateChunkOrWord(
+                            lexiconPopup.chunkText,
+                            lexiconPopup.chunkIdx,
+                            lexiconPopup.chunkText
+                          )
+                        }
+                        className={`px-1.5 py-0.5 border text-[11px] cursor-pointer ${
+                          lexiconPopup.activeQuery === lexiconPopup.chunkText
+                            ? 'border-[#00F5D4] bg-[#00F5D4]/20 text-[#00F5D4] font-bold'
+                            : 'border-[#6C7A89]/40 bg-[#180B29] text-[#6C7A89] hover:text-[#F2F5F8]'
+                        }`}
+                      >
+                        PHRASE
+                      </button>
+                      {lexiconPopup.words.map((w) => (
+                        <button
+                          key={w}
+                          type="button"
+                          onClick={() =>
+                            void handleTranslateChunkOrWord(
+                              w,
+                              lexiconPopup.chunkIdx,
+                              lexiconPopup.chunkText
+                            )
+                          }
+                          className={`px-1.5 py-0.5 border text-[11px] cursor-pointer ${
+                            lexiconPopup.activeQuery === w
+                              ? 'border-[#FFE600] bg-[#FFE600]/20 text-[#FFE600] font-bold'
+                              : 'border-[#6C7A89]/40 bg-[#180B29] text-[#F2F5F8] hover:border-[#FFE600]/60'
+                          }`}
+                        >
+                          {w}
+                        </button>
+                      ))}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setLexiconPopup(null)}
+                      className="text-[#6C7A89] hover:text-[#F2F5F8] cursor-pointer shrink-0 p-0.5"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+
+                  {/* Translation Result & Instant Resume */}
+                  <div className="p-2 bg-[#180B29] border border-[#00F5D4]/30 flex items-center justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[10px] text-[#6C7A89] truncate">
+                        {lexiconPopup.activeQuery} ({translationLang.toUpperCase()}
+                        {lexiconPopup.source
+                          ? ` · ${lexiconPopup.source.toUpperCase()}`
+                          : ''}
+                        )
+                      </div>
+                      {lexiconPopup.loading ? (
+                        <div className="text-[#00F5D4] text-xs flex items-center gap-1.5 mt-0.5">
+                          <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+                          <span>Translating...</span>
+                        </div>
+                      ) : lexiconPopup.error ? (
+                        <div className="text-[#FF1E7A] text-xs mt-0.5">
+                          {lexiconPopup.error}
+                        </div>
+                      ) : (
+                        <div className="font-bold text-sm text-[#00F5D4] mt-0.5 break-words">
+                          {lexiconPopup.translation}
+                        </div>
+                      )}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        soundEngine.playUiClick();
+                        setLexiconPopup(null);
+                        setIsPlaying(true);
+                      }}
+                      className="cyber-btn px-2.5 py-1.5 bg-[#00F5D4] text-[#0D0618] font-bold text-[11px] shrink-0"
+                    >
+                      RESUME
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
 
           {/* Minimal Footer Hint & Skip to Quiz */}
           {selectedMode !== 'tachistoscope' && (
