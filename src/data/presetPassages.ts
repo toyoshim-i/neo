@@ -1493,12 +1493,12 @@ export const CALIBRATION_PASSAGE: TrainingPassage = buildPassage(
         code: 'CAL-01',
         question: 'How do human eyes actually move across a line of text?',
         options: [
-          'In quick jumps (saccades) that capture short groups of words.',
           'In a continuous, uninterrupted mechanical sweep.',
+          'In quick jumps (saccades) that capture short groups of words.',
           'From the bottom of the page upward in vertical columns.',
           'By focusing on only one single letter for two seconds.',
         ],
-        correctIndex: 0,
+        correctIndex: 1,
         explanation:
           'The eyes move in ballistic jumps called saccades, pausing briefly to absorb short phrases.',
       },
@@ -1507,12 +1507,12 @@ export const CALIBRATION_PASSAGE: TrainingPassage = buildPassage(
         code: 'CAL-02',
         question: 'Why does pronouncing every word in your head (inner speech) limit reading speed?',
         options: [
-          'Because it restricts reading to normal talking speed (~150 words per minute).',
           'Because it causes the screen brightness to fluctuate.',
           'Because the visual cortex shuts down during silent reading.',
+          'Because it restricts reading to normal talking speed (~150 words per minute).',
           'Because English sentences never contain more than four words.',
         ],
-        correctIndex: 0,
+        correctIndex: 2,
         explanation:
           'Inner speech (subvocalization) ties reading speed to vocal speaking speed, around 150 WPM.',
       },
@@ -1521,12 +1521,12 @@ export const CALIBRATION_PASSAGE: TrainingPassage = buildPassage(
         code: 'CAL-03',
         question: 'What is the benefit of recognizing meaningful phrases at a glance?',
         options: [
-          'You can understand ideas faster with less mental fatigue.',
           'You no longer need to understand the meaning of sentences.',
           'You can memorize the dictionary in alphabetical order.',
           'You can read with your eyes completely closed.',
+          'You can understand ideas faster with less mental fatigue.',
         ],
-        correctIndex: 0,
+        correctIndex: 3,
         explanation:
           'Visual phrase recognition lets the brain extract meaning directly and rapidly with less effort.',
       },

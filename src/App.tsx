@@ -38,6 +38,7 @@ import { PRESET_PASSAGES, CALIBRATION_PASSAGE } from './data/presetPassages';
 import {
   TrainingMode,
   TrainingPassage,
+  QuizQuestion,
   SessionLog,
   UserProfile,
   AchievementId,
@@ -109,6 +110,36 @@ const MODE_INFO: Record<TrainingMode, { label: string; shortDesc: string }> = {
       'Flash 3–4 word phrases for ~170ms to train parallel parafoveal recognition.',
   },
 };
+
+function shuffleQuizQuestions(questions: QuizQuestion[]): QuizQuestion[] {
+  return questions.map((q) => {
+    const pairs = q.options.map((text, idx) => ({
+      text,
+      isCorrect: idx === q.correctIndex,
+    }));
+    for (let i = pairs.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const tmp = pairs[i];
+      pairs[i] = pairs[j];
+      pairs[j] = tmp;
+    }
+    const newOptions = pairs.map((p) => p.text) as [
+      string,
+      string,
+      string,
+      string,
+    ];
+    const newCorrectIndex = Math.max(
+      0,
+      pairs.findIndex((p) => p.isCorrect)
+    );
+    return {
+      ...q,
+      options: newOptions,
+      correctIndex: newCorrectIndex,
+    };
+  });
+}
 
 export function App() {
   // Navigation & Hierarchy State
@@ -215,7 +246,10 @@ export function App() {
     anchorBottom: number;
   } | null>(null);
 
-  // Active Quiz State (1 question at a time)
+  // Active Quiz State (1 question at a time, options shuffled each session)
+  const [activeQuizQuestions, setActiveQuizQuestions] = useState<
+    QuizQuestion[]
+  >(() => shuffleQuizQuestions(PRESET_PASSAGES[0].questions));
   const [quizIndex, setQuizIndex] = useState<number>(0);
   const [selectedOption, setSelectedOption] = useState<number | null>(null);
   const [correctCount, setCorrectCount] = useState<number>(0);
@@ -376,6 +410,7 @@ export function App() {
       setMeasuredCalibrationRawWpm(rawMeasured);
       setTargetWpm(rawMeasured);
       soundEngine.playPassTransition(3);
+      setActiveQuizQuestions(shuffleQuizQuestions(CALIBRATION_PASSAGE.questions));
       setQuizIndex(0);
       setSelectedOption(null);
       setCorrectCount(0);
@@ -514,6 +549,7 @@ export function App() {
   // Transition from Reading to Quiz
   const startQuizPhase = useCallback(() => {
     setIsPlaying(false);
+    setActiveQuizQuestions(shuffleQuizQuestions(selectedPassage.questions));
     setQuizIndex(0);
     setSelectedOption(null);
     setCorrectCount(0);
@@ -521,7 +557,7 @@ export function App() {
     setLastResponseSec(null);
     questionStartTimeRef.current = Date.now();
     setScreen('quiz');
-  }, []);
+  }, [selectedPassage.questions]);
 
   // Finalize Session & Save to IndexedDB
   const finalizeSession = useCallback(
@@ -777,7 +813,8 @@ export function App() {
       setLastResponseSec(elapsedSec);
       setSelectedOption(optIndex);
 
-      const currentQuestion = selectedPassage.questions[quizIndex];
+      const currentQuestion =
+        activeQuizQuestions[quizIndex] || selectedPassage.questions[quizIndex];
       const isCorrect = optIndex === currentQuestion.correctIndex;
       const isCritical = isCorrect && elapsedSec <= 3.0;
 
@@ -792,22 +829,29 @@ export function App() {
         soundEngine.playQuizWrong();
       }
     },
-    [selectedOption, selectedPassage.questions, quizIndex]
+    [selectedOption, activeQuizQuestions, selectedPassage.questions, quizIndex]
   );
 
   // Advance to Next Quiz Question or Final Result
   const handleNextQuizStep = useCallback(() => {
     soundEngine.playUiClick();
-    if (quizIndex < selectedPassage.questions.length - 1) {
+    const totalQ = activeQuizQuestions.length || selectedPassage.questions.length;
+    if (quizIndex < totalQ - 1) {
       setQuizIndex((i) => i + 1);
       setSelectedOption(null);
       setOperatorState('observing');
       setLastResponseSec(null);
       questionStartTimeRef.current = Date.now();
     } else {
-      finalizeSession(correctCount, selectedPassage.questions.length);
+      finalizeSession(correctCount, totalQ);
     }
-  }, [quizIndex, selectedPassage.questions.length, finalizeSession, correctCount]);
+  }, [
+    quizIndex,
+    activeQuizQuestions.length,
+    selectedPassage.questions.length,
+    finalizeSession,
+    correctCount,
+  ]);
 
   // Keyboard shortcuts 1-4 and Enter on Quiz Screen
   useEffect(() => {
@@ -2027,14 +2071,18 @@ export function App() {
           />
 
           {(() => {
-            const q = selectedPassage.questions[quizIndex];
+            const quizList =
+              activeQuizQuestions.length > 0
+                ? activeQuizQuestions
+                : selectedPassage.questions;
+            const q = quizList[quizIndex] || selectedPassage.questions[0];
             return (
               <ChamferedPanel
                 variant="yellow"
                 cutSize={12}
                 tag={q.code}
                 title={`COMPREHENSION CHECK // QUESTION ${quizIndex + 1} OF ${
-                  selectedPassage.questions.length
+                  quizList.length
                 }`}
               >
                 <div className="p-6 space-y-5">
