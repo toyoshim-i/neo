@@ -80,6 +80,8 @@ import {
   TRANSLATION_LANGUAGES,
   getSavedTranslationLang,
   saveTranslationLangSelection,
+  getSavedCloudTranslationEnabled,
+  saveCloudTranslationEnabled,
   translateSelection,
 } from './lib/llmClient';
 import { buildNormalizedPassage } from './lib/chunker';
@@ -304,6 +306,9 @@ export function App() {
   const [fadeOutPassed, setFadeOutPassed] = useState<boolean>(true);
   const [translationLang, setTranslationLang] = useState<TranslationLangCode>(
     getSavedTranslationLang()
+  );
+  const [allowCloudTranslation, setAllowCloudTranslation] = useState<boolean>(
+    getSavedCloudTranslationEnabled()
   );
   const [llmProvider, setLlmProvider] = useState<LlmProviderType>(
     isWebGpuSupported() ? 'webllm' : 'rule_based'
@@ -620,6 +625,7 @@ export function App() {
           webLlmModel: selectedWebLlmModel,
           llmEndpoint: profile.llmEndpoint,
           llmModel: profile.llmModel,
+          allowCloudApi: allowCloudTranslation,
         });
         setLexiconPopup((prev) =>
           prev && prev.activeQuery === queryText
@@ -647,6 +653,7 @@ export function App() {
     [
       selectedPassage.chunks,
       translationLang,
+      allowCloudTranslation,
       llmProvider,
       selectedWebLlmModel,
       profile.llmEndpoint,
@@ -2115,8 +2122,20 @@ export function App() {
                           <span>Translating...</span>
                         </div>
                       ) : lexiconPopup.error ? (
-                        <div className="text-[#FF1E7A] text-xs mt-0.5">
-                          {lexiconPopup.error}
+                        <div className="space-y-1.5 mt-1">
+                          <div className="text-[#FF1E7A] text-[11px] leading-snug">
+                            {lexiconPopup.error}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              soundEngine.playUiClick();
+                              setShowSettingsModal(true);
+                            }}
+                            className="cyber-btn px-2 py-1 bg-[#FFE600]/15 border border-[#FFE600] text-[#FFE600] text-[10px] font-bold"
+                          >
+                            OPEN CONFIG TO ENABLE
+                          </button>
                         </div>
                       ) : (
                         <div className="font-bold text-sm text-[#00F5D4] mt-0.5 break-words">
@@ -3032,6 +3051,37 @@ export function App() {
                         </button>
                       );
                     })}
+                  </div>
+
+                  {/* Opt-in External Translation API Toggle (Default OFF) */}
+                  <div className="pt-2 flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-[11px] text-[#F2F5F8] font-bold">
+                        EXTERNAL TRANSLATION API (CLOUD FALLBACK)
+                      </div>
+                      <div className="text-[10px] text-[#6C7A89]">
+                        Send tapped word/phrase to external REST dictionary when
+                        on-device LLM is not loaded. Default: OFF.
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        soundEngine.playUiClick();
+                        setAllowCloudTranslation((prev) => {
+                          const next = !prev;
+                          saveCloudTranslationEnabled(next);
+                          return next;
+                        });
+                      }}
+                      className={`cyber-btn px-3 py-1 border font-bold shrink-0 ${
+                        allowCloudTranslation
+                          ? 'border-[#00F5D4] bg-[#00F5D4]/15 text-[#00F5D4]'
+                          : 'border-[#6C7A89] text-[#6C7A89]'
+                      }`}
+                    >
+                      {allowCloudTranslation ? 'ON' : 'OFF'}
+                    </button>
                   </div>
                 </div>
 

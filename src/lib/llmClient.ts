@@ -104,6 +104,24 @@ export function saveTranslationLangSelection(lang: TranslationLangCode): void {
   }
 }
 
+const CLOUD_TRANSLATION_STORAGE_KEY = 'wetware_allow_cloud_translation';
+
+export function getSavedCloudTranslationEnabled(): boolean {
+  if (typeof window !== 'undefined') {
+    return window.localStorage.getItem(CLOUD_TRANSLATION_STORAGE_KEY) === 'true';
+  }
+  return false; // Default OFF for strict privacy
+}
+
+export function saveCloudTranslationEnabled(enabled: boolean): void {
+  if (typeof window !== 'undefined') {
+    window.localStorage.setItem(
+      CLOUD_TRANSLATION_STORAGE_KEY,
+      enabled ? 'true' : 'false'
+    );
+  }
+}
+
 // Hybrid Rule + Lightweight LLM Distractor Architecture (Method 2):
 // - Semantic chunking & Cloze sentence extraction are handled deterministically in <1ms by `chunker.ts`.
 // - Instead of asking a tiny 1B model to synthesize nested JSON quizzes (which exceeds 1B reasoning capacity
@@ -907,8 +925,7 @@ export async function processPassageWithOptionalLlm(params: {
 /**
  * Translates a selected word or phrase into the user's configured target language.
  * - Uses in-browser WebLLM (if provider === 'webllm' and loaded in VRAM) or Ollama (if provider === 'ollama').
- * - Automatically falls back to the zero-VRAM MyMemory Translation API so iPhones/mobile devices
- *   can translate words instantaneously without loading a multi-GB model into RAM.
+ * - Only uses the external translation API if the user explicitly enabled `allowCloudApi` in CONFIG (default OFF).
  */
 export async function translateSelection(params: {
   text: string;
@@ -918,6 +935,7 @@ export async function translateSelection(params: {
   webLlmModel?: string;
   llmEndpoint?: string;
   llmModel?: string;
+  allowCloudApi?: boolean;
 }): Promise<{
   translation: string;
   source: 'webllm' | 'ollama' | 'cloud_dict';
@@ -931,7 +949,7 @@ export async function translateSelection(params: {
     ? `Translate "${cleanText}" into ${langInfo.englishName} (used in: "${params.contextSentence}"). Output ONLY the concise ${langInfo.englishName} translation in one short line:`
     : `Translate "${cleanText}" into ${langInfo.englishName}. Output ONLY the concise ${langInfo.englishName} translation in one short line:`;
 
-  // 1. If WebLLM is selected AND already loaded in VRAM (or user explicitly chose webllm), try fast 1-line translation
+  // 1. If WebLLM is selected AND already loaded in VRAM, run on-device translation
   if (params.provider === 'webllm' && isWebLlmReady(params.webLlmModel)) {
     try {
       const engine = await initWebLlmEngine(
@@ -952,7 +970,7 @@ export async function translateSelection(params: {
         return { translation: out, source: 'webllm' };
       }
     } catch {
-      // Fall through to instant dictionary API
+      // Fall through if permitted
     }
   }
 
@@ -992,11 +1010,17 @@ export async function translateSelection(params: {
         }
       }
     } catch {
-      // Fall through to instant dictionary API
+      // Fall through if permitted
     }
   }
 
-  // 3. Zero-VRAM Instant Translation Fallback (MyMemory REST API — works on iPhone without OOM)
+  // 3. External Translation API (Strictly Opt-In; Default OFF)
+  if (!params.allowCloudApi) {
+    throw new Error(
+      'Translation engine offline. Please load an on-device LLM into VRAM or enable the External Translation API in CONFIG.'
+    );
+  }
+
   const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(
     cleanText
   )}&langpair=en|${encodeURIComponent(params.targetLang)}`;
