@@ -141,6 +141,114 @@ function shuffleQuizQuestions(questions: QuizQuestion[]): QuizQuestion[] {
   });
 }
 
+// Low-cost function words (articles, short prepositions, auxiliaries, conjunctions)
+// absorbed parafoveally with minimal cognitive fixation cost (Rayner, 1998).
+const LOW_COST_FUNCTION_WORDS = new Set([
+  'a',
+  'an',
+  'the',
+  'to',
+  'of',
+  'in',
+  'on',
+  'at',
+  'by',
+  'for',
+  'with',
+  'from',
+  'into',
+  'onto',
+  'upon',
+  'as',
+  'is',
+  'are',
+  'was',
+  'were',
+  'be',
+  'been',
+  'am',
+  'or',
+  'and',
+  'but',
+  'nor',
+  'so',
+  'yet',
+  'if',
+  'it',
+  'its',
+  'this',
+  'that',
+  'these',
+  'those',
+  'do',
+  'does',
+  'did',
+  'can',
+  'may',
+  'not',
+]);
+
+/**
+ * Computes the cognitive & visual fixation weight of a single chunk:
+ * - Base oculomotor saccade landing cost (0.65 standard word units) so short chunks never flash past instantaneously.
+ * - Articles ('a', 'an', 'the') carry near-zero lexical weight (0.18).
+ * - Short function words carry discounted weight (0.32).
+ * - Content words scale smoothly with character length: (charLen / 5.2) ^ 1.12, giving long compound/academic words
+ *   sufficient decoding time while keeping short content words brisk.
+ * - Gentle punctuation wrap-up pause (+15% sentence-end, +7% clause comma) instead of jarring 1.45x-1.8x freezes.
+ */
+function computeChunkCognitiveWeight(
+  chunk: string,
+  mode: TrainingMode
+): number {
+  const tokens = chunk.trim().split(/\s+/).filter(Boolean);
+  let lexicalLoad = 0;
+
+  for (const rawToken of tokens) {
+    const clean = rawToken.replace(/[^A-Za-z0-9]/g, '').toLowerCase();
+    if (!clean) continue;
+
+    if (clean === 'a' || clean === 'an' || clean === 'the') {
+      lexicalLoad += 0.18;
+    } else if (LOW_COST_FUNCTION_WORDS.has(clean)) {
+      lexicalLoad += 0.32;
+    } else {
+      const charLen = Math.max(2, clean.length);
+      lexicalLoad += Math.pow(charLen / 5.2, 1.12);
+    }
+  }
+
+  let weight = 0.65 + lexicalLoad;
+
+  if (/[.!?]["'”’)]*$/.test(chunk)) {
+    weight *= mode === 'rsvp' ? 1.32 : 1.15;
+  } else if (/[,;:—]["'”’)]*$/.test(chunk)) {
+    weight *= mode === 'rsvp' ? 1.16 : 1.07;
+  }
+
+  return weight;
+}
+
+/**
+ * Computes the exact millisecond duration for `chunkIndex` such that:
+ * 1. Every chunk's duration is proportional to its character/lexical cognitive weight.
+ * 2. The sum of all chunk durations across the passage equals the exact total time for `activeWpm`.
+ */
+function computeChunkDurationMs(
+  chunks: string[],
+  chunkIndex: number,
+  totalWords: number,
+  activeWpm: number,
+  mode: TrainingMode
+): number {
+  if (chunks.length === 0) return 250;
+  const weights = chunks.map((c) => computeChunkCognitiveWeight(c, mode));
+  const totalWeight = weights.reduce((acc, w) => acc + w, 0) || 1;
+  const totalPassageMs = (Math.max(1, totalWords) / Math.max(60, activeWpm)) * 60000;
+  const targetWeight = weights[chunkIndex] ?? weights[0];
+  return Math.max(70, Math.round(totalPassageMs * (targetWeight / totalWeight)));
+}
+
 export function App() {
   // Navigation & Hierarchy State
   const [screen, setScreen] = useState<ScreenState>('title');
@@ -694,20 +802,13 @@ export function App() {
       return;
     }
 
-    const currentChunk = selectedPassage.chunks[activeChunkIndex] || '';
-    const wordsInChunk = Math.max(1, currentChunk.split(/\s+/).length);
-    let intervalMs = Math.round((wordsInChunk / activeWpm) * 60000);
-
-    // Section 4 Mode 2: Punctuation wait control (, x1.3, . x1.8)
-    if (/[.!?]$/.test(currentChunk)) {
-      intervalMs = Math.round(
-        intervalMs * (selectedMode === 'rsvp' ? 1.8 : 1.45)
-      );
-    } else if (/[,;:—]$/.test(currentChunk)) {
-      intervalMs = Math.round(
-        intervalMs * (selectedMode === 'rsvp' ? 1.3 : 1.2)
-      );
-    }
+    const intervalMs = computeChunkDurationMs(
+      selectedPassage.chunks,
+      activeChunkIndex,
+      selectedPassage.wordCount,
+      activeWpm,
+      selectedMode
+    );
 
     const timer = window.setTimeout(() => {
       if (activeChunkIndex < selectedPassage.chunks.length - 1) {
