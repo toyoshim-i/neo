@@ -10,8 +10,15 @@ export interface FiveAxisMetrics {
 
 export interface BenchmarkComparison {
   zScore: number;
-  topPercentile: number;    // e.g. 8.4 means TOP 8.4%
-  rankLabel: 'APEX // TOP 1%' | 'PRO // TOP 10%' | 'NATIVE STANDARD' | 'CALIBRATING';
+  topPercentile: number;    // L1 Native distribution N(238, 51): e.g. 8.4 means TOP 8.4%
+  l2ZScore: number;
+  l2TopPercentile: number;  // L2 Non-native distribution N(145, 42): e.g. 12.5 means TOP 12.5%
+  rankLabel:
+    | 'APEX // L1 TOP 1%'
+    | 'PRO // L1 TOP 10%'
+    | 'NATIVE STANDARD'
+    | 'L2 ADVANCED // TOP 25%'
+    | 'CALIBRATING';
   weakestAxis: keyof FiveAxisMetrics;
   recommendedMode: TrainingMode;
   diagnosisText: string;
@@ -40,8 +47,9 @@ function erf(x: number): number {
 }
 
 /**
- * Calculates human percentile from eWPM using N(mu = 238, sigma = 51)
- * Section 3: Z = (eWPM - 238) / 51
+ * Calculates human percentiles from eWPM against both:
+ * - L1 Native English Readers: N(mu = 238, sigma = 51) (Brysbaert 2019)
+ * - L2 Global Non-Native English Readers: N(mu = 145, sigma = 42)
  */
 export function calculateHumanBenchmark(
   metrics: FiveAxisMetrics
@@ -55,13 +63,23 @@ export function calculateHumanBenchmark(
   const rawTopPercent = Math.max(0.1, Math.min(99.9, (1 - cdf) * 100));
   const topPercentile = Math.round(rawTopPercent * 10) / 10;
 
+  // L2 Global English Reader benchmark: N(mu = 145, sigma = 42)
+  const l2Mu = 145;
+  const l2Sigma = 42;
+  const l2ZScore = (metrics.effectiveWpm - l2Mu) / l2Sigma;
+  const l2Cdf = 0.5 * (1 + erf(l2ZScore / Math.SQRT2));
+  const rawL2TopPercent = Math.max(0.1, Math.min(99.9, (1 - l2Cdf) * 100));
+  const l2TopPercentile = Math.round(rawL2TopPercent * 10) / 10;
+
   let rankLabel: BenchmarkComparison['rankLabel'] = 'CALIBRATING';
   if (topPercentile <= 1.5 || metrics.effectiveWpm >= 450) {
-    rankLabel = 'APEX // TOP 1%';
+    rankLabel = 'APEX // L1 TOP 1%';
   } else if (topPercentile <= 10.5 || metrics.effectiveWpm >= 320) {
-    rankLabel = 'PRO // TOP 10%';
+    rankLabel = 'PRO // L1 TOP 10%';
   } else if (metrics.effectiveWpm >= 210) {
     rankLabel = 'NATIVE STANDARD';
+  } else if (l2TopPercentile <= 25.0 || metrics.effectiveWpm >= 175) {
+    rankLabel = 'L2 ADVANCED // TOP 25%';
   }
 
   // Normalize each axis (0..100 where 50 is Human Native Avg) to detect bottleneck
@@ -118,6 +136,8 @@ export function calculateHumanBenchmark(
   return {
     zScore,
     topPercentile,
+    l2ZScore,
+    l2TopPercentile,
     rankLabel,
     weakestAxis,
     recommendedMode,

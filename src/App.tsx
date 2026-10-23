@@ -2419,7 +2419,8 @@ export function App() {
                   title="NEURAL SYNC REPORT"
                   rightSlot={
                     <span className="text-[#FFE600] font-bold">
-                      HUMAN TOP {benchmark.topPercentile}%
+                      L2 TOP {benchmark.l2TopPercentile}% · L1 TOP{' '}
+                      {benchmark.topPercentile}%
                     </span>
                   }
                 >
@@ -2435,8 +2436,23 @@ export function App() {
                             {lastSessionMetrics.effectiveWpm}{' '}
                             <span className="text-base font-normal">eWPM</span>
                           </div>
-                          <div className="font-terminal text-xs text-[#FFE600] mt-1.5">
-                            TOP {benchmark.topPercentile}% OF HUMAN READERS
+                          <div className="font-terminal text-xs mt-2 space-y-1">
+                            <div className="flex items-center justify-between text-[#FFE600]">
+                              <span className="text-[#6C7A89]">
+                                L2 GLOBAL READERS:
+                              </span>
+                              <strong>
+                                TOP {benchmark.l2TopPercentile}%
+                              </strong>
+                            </div>
+                            <div className="flex items-center justify-between text-[#00F5D4]">
+                              <span className="text-[#6C7A89]">
+                                L1 NATIVE READERS:
+                              </span>
+                              <strong>
+                                TOP {benchmark.topPercentile}%
+                              </strong>
+                            </div>
                           </div>
                           <div className="font-terminal text-[11px] mt-2 pt-2 border-t border-[#6C7A89]/30 space-y-0.5">
                             <div>
