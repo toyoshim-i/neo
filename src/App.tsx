@@ -74,6 +74,8 @@ import {
   initWebLlmEngine,
   isWebGpuSupported,
   isWebLlmReady,
+  isWebLlmLoading,
+  subscribeWebLlmProgress,
   checkCachedWebLlmModels,
   saveWebLlmModelSelection,
   TranslationLangCode,
@@ -318,7 +320,12 @@ export function App() {
   const [webLlmStatus, setWebLlmStatus] = useState<string>(
     isWebLlmReady(DEFAULT_WEBLLM_MODEL) ? 'READY IN VRAM' : 'NOT LOADED'
   );
-  const [isPreloadingWebLlm, setIsPreloadingWebLlm] = useState<boolean>(false);
+  const [isPreloadingWebLlm, setIsPreloadingWebLlm] = useState<boolean>(
+    isWebLlmLoading()
+  );
+  const [webLlmProgressPct, setWebLlmProgressPct] = useState<number | null>(
+    null
+  );
 
   const [targetWpm, setTargetWpm] = useState<number>(getSavedTargetWpm());
   const [selectedMode, setSelectedMode] = useState<TrainingMode>('chunk_pacer');
@@ -433,6 +440,18 @@ export function App() {
       );
     });
   }, [reloadFromDb]);
+
+  // Subscribe to background WebLLM download/load progress so it continues seamlessly
+  // even when the CONFIG modal is closed and the user is reading or navigating
+  useEffect(() => {
+    const unsub = subscribeWebLlmProgress((text, prog) => {
+      const pct = Math.round(prog * 100);
+      setIsPreloadingWebLlm(true);
+      setWebLlmProgressPct(pct);
+      setWebLlmStatus(`${pct}% // ${text}`);
+    });
+    return () => unsub();
+  }, []);
 
   const allPassages: TrainingPassage[] = [
     ...customPassages,
@@ -1183,6 +1202,9 @@ export function App() {
         sessionCount={sessionHistory.length}
         achievementCount={profile.unlockedAchievements?.length || 0}
         totalAchievements={ACHIEVEMENT_CATALOG.length}
+        llmDownloadProgressPct={
+          isPreloadingWebLlm ? (webLlmProgressPct ?? 0) : null
+        }
         onToggleMute={handleToggleMute}
         onOpenAchievements={() => setShowAchievementsModal(true)}
         onOpenHistory={() => setShowHistoryModal(true)}
@@ -3174,33 +3196,34 @@ export function App() {
                       <button
                         type="button"
                         disabled={isPreloadingWebLlm}
-                        onClick={async () => {
+                        onClick={() => {
                           setIsPreloadingWebLlm(true);
-                          try {
-                            await initWebLlmEngine(
-                              selectedWebLlmModel,
-                              (text, prog) => {
-                                setWebLlmStatus(
-                                  `${Math.round(prog * 100)}% // ${text}`
-                                );
-                              }
-                            );
-                            setWebLlmStatus('READY IN VRAM');
-                            const updatedCache = await checkCachedWebLlmModels();
-                            setCachedModels(updatedCache);
-                            soundEngine.playQuizCorrect(false);
-                          } catch (e) {
-                            setWebLlmStatus(
-                              e instanceof Error ? e.message : 'Load error'
-                            );
-                          } finally {
-                            setIsPreloadingWebLlm(false);
-                          }
+                          setWebLlmProgressPct(0);
+                          // Fire-and-forget background task so user can close CONFIG and start reading immediately
+                          void initWebLlmEngine(selectedWebLlmModel)
+                            .then(async () => {
+                              setWebLlmStatus('READY IN VRAM');
+                              const updatedCache =
+                                await checkCachedWebLlmModels();
+                              setCachedModels(updatedCache);
+                              soundEngine.playQuizCorrect(false);
+                            })
+                            .catch((e) => {
+                              setWebLlmStatus(
+                                e instanceof Error ? e.message : 'Load error'
+                              );
+                            })
+                            .finally(() => {
+                              setIsPreloadingWebLlm(false);
+                              setWebLlmProgressPct(null);
+                            });
                         }}
                         className="cyber-btn w-full py-1.5 bg-[#FFE600]/15 border border-[#FFE600] text-[#FFE600] font-bold text-[10px] hover:bg-[#FFE600]/25"
                       >
                         {isPreloadingWebLlm
-                          ? 'LOADING INTO VRAM...'
+                          ? `DOWNLOADING IN BACKGROUND (${
+                              webLlmProgressPct ?? 0
+                            }%) — SAFE TO CLOSE CONFIG`
                           : isWebLlmReady(selectedWebLlmModel)
                           ? 'MODEL LOADED IN VRAM (READY)'
                           : cachedModels[selectedWebLlmModel]

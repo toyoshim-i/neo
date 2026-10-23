@@ -295,11 +295,18 @@ function applyLlmDistractorsToQuestions(
 }
 
 // Persist engine singleton on globalThis so Vite HMR updates never drop VRAM state
-const ENGINE_CONFIG_VERSION = 3;
+const ENGINE_CONFIG_VERSION = 4;
+
+type ProgressListener = (text: string, progress: number) => void;
 
 interface GlobalWebLlmState {
   engine: MLCEngineInterface | null;
   loadedModelId: string | null;
+  loadingModelId: string | null;
+  loadingPromise: Promise<MLCEngineInterface> | null;
+  lastProgressText: string;
+  lastProgressRatio: number;
+  listeners: Set<ProgressListener>;
   configVersion?: number;
 }
 
@@ -314,11 +321,32 @@ const globalState: GlobalWebLlmState = (() => {
     g.__WETWARE_WEBLLM__ = {
       engine: null,
       loadedModelId: null,
+      loadingModelId: null,
+      loadingPromise: null,
+      lastProgressText: '',
+      lastProgressRatio: 0,
+      listeners: new Set<ProgressListener>(),
       configVersion: ENGINE_CONFIG_VERSION,
     };
   }
   return g.__WETWARE_WEBLLM__;
 })();
+
+export function subscribeWebLlmProgress(
+  listener: ProgressListener
+): () => void {
+  globalState.listeners.add(listener);
+  if (globalState.loadingPromise && globalState.lastProgressText) {
+    listener(globalState.lastProgressText, globalState.lastProgressRatio);
+  }
+  return () => {
+    globalState.listeners.delete(listener);
+  };
+}
+
+export function isWebLlmLoading(): boolean {
+  return globalState.loadingPromise !== null;
+}
 
 export function isWebGpuSupported(): boolean {
   return typeof navigator !== 'undefined' && 'gpu' in navigator;
@@ -408,29 +436,62 @@ export async function initWebLlmEngine(
     return globalState.engine;
   }
 
-  if (globalState.engine) {
-    globalState.engine.setInitProgressCallback((report: InitProgressReport) => {
-      onProgress?.(report.text, report.progress);
-    });
-    await globalState.engine.reload(resolvedModelId, chatOpts);
-    globalState.loadedModelId = resolvedModelId;
-    return globalState.engine;
+  // If a download/load for the same model is already running in the background,
+  // attach the progress callback and reuse the in-flight promise instead of starting a second load.
+  if (
+    globalState.loadingPromise &&
+    globalState.loadingModelId?.toLowerCase() === resolvedModelId.toLowerCase()
+  ) {
+    if (onProgress) {
+      const unsub = subscribeWebLlmProgress(onProgress);
+      return globalState.loadingPromise.finally(() => unsub());
+    }
+    return globalState.loadingPromise;
   }
 
-  const engine = await CreateMLCEngine(
-    resolvedModelId,
-    {
-      appConfig: prebuiltAppConfig,
-      initProgressCallback: (report: InitProgressReport) => {
-        onProgress?.(report.text, report.progress);
-      },
-    },
-    chatOpts
-  );
+  const notifyProgress = (report: InitProgressReport) => {
+    globalState.lastProgressText = report.text;
+    globalState.lastProgressRatio = report.progress;
+    onProgress?.(report.text, report.progress);
+    globalState.listeners.forEach((fn) => {
+      try {
+        fn(report.text, report.progress);
+      } catch {
+        // Ignore listener error
+      }
+    });
+  };
 
-  globalState.engine = engine;
-  globalState.loadedModelId = resolvedModelId;
-  return engine;
+  globalState.loadingModelId = resolvedModelId;
+  const loadTask = (async (): Promise<MLCEngineInterface> => {
+    try {
+      if (globalState.engine) {
+        globalState.engine.setInitProgressCallback(notifyProgress);
+        await globalState.engine.reload(resolvedModelId, chatOpts);
+        globalState.loadedModelId = resolvedModelId;
+        return globalState.engine;
+      }
+
+      const engine = await CreateMLCEngine(
+        resolvedModelId,
+        {
+          appConfig: prebuiltAppConfig,
+          initProgressCallback: notifyProgress,
+        },
+        chatOpts
+      );
+
+      globalState.engine = engine;
+      globalState.loadedModelId = resolvedModelId;
+      return engine;
+    } finally {
+      globalState.loadingPromise = null;
+      globalState.loadingModelId = null;
+    }
+  })();
+
+  globalState.loadingPromise = loadTask;
+  return loadTask;
 }
 
 function repairAndParseJson(candidate: string): Record<string, unknown> {

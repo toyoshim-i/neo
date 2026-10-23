@@ -1,5 +1,13 @@
 import React from 'react';
-import { Volume2, VolumeX, Cpu, Settings, BarChart2, Award } from 'lucide-react';
+import {
+  Volume2,
+  VolumeX,
+  Cpu,
+  Settings,
+  BarChart2,
+  Award,
+  Loader2,
+} from 'lucide-react';
 import { soundEngine } from '../../lib/soundEngine';
 
 interface CyberHeaderProps {
@@ -8,6 +16,7 @@ interface CyberHeaderProps {
   sessionCount: number;
   achievementCount?: number;
   totalAchievements?: number;
+  llmDownloadProgressPct?: number | null;
   onToggleMute: () => void;
   onOpenHistory: () => void;
   onOpenSettings: () => void;
@@ -21,6 +30,7 @@ export const CyberHeader: React.FC<CyberHeaderProps> = ({
   sessionCount,
   achievementCount = 0,
   totalAchievements = 6,
+  llmDownloadProgressPct = null,
   onToggleMute,
   onOpenHistory,
   onOpenSettings,
@@ -56,6 +66,21 @@ export const CyberHeader: React.FC<CyberHeaderProps> = ({
 
         {/* Right: Minimal Utility Controls */}
         <div className="flex items-center gap-2 font-terminal text-xs">
+          {llmDownloadProgressPct !== null && (
+            <button
+              type="button"
+              onClick={() => {
+                soundEngine.playUiClick();
+                onOpenSettings();
+              }}
+              title="Model downloading in background — click to view status"
+              className="cyber-btn px-2 py-1.5 border border-[#00F5D4] bg-[#00F5D4]/15 text-[#00F5D4] flex items-center gap-1.5"
+            >
+              <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+              <span>LLM {llmDownloadProgressPct}%</span>
+            </button>
+          )}
+
           {onOpenAchievements && (
             <button
               type="button"
