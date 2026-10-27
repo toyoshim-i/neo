@@ -1631,76 +1631,94 @@ function isValidTargetLanguageTranslation(
 
 function buildTranslationChatMessages(
   cleanText: string,
-  targetLang: TranslationLangCode,
-  englishName: string
+  targetLang: TranslationLangCode
 ): Array<{ role: 'system' | 'user' | 'assistant'; content: string }> {
-  if (targetLang === 'ja') {
-    return [
-      {
-        role: 'system',
-        content:
-          'あなたは英和辞典です。入力された英語の簡潔な日本語訳のみを出力してください。英単語や類義語、説明文は絶対に出力しないでください。',
-      },
-      {
-        role: 'user',
-        content: 'rapid',
-      },
-      {
-        role: 'assistant',
-        content: '急速な、速い',
-      },
-      {
-        role: 'user',
-        content: 'extract vital cues',
-      },
-      {
-        role: 'assistant',
-        content: '重要な手がかりを抽出する',
-      },
-      {
-        role: 'user',
-        content: cleanText,
-      },
-    ];
-  }
-
-  const examplesByLang: Record<
-    Exclude<TranslationLangCode, 'ja'>,
-    [string, string]
+  const localizedTemplates: Record<
+    TranslationLangCode,
+    {
+      system: string;
+      formatUser: (term: string) => string;
+      ex1: string;
+      ex2: string;
+    }
   > = {
-    'zh-CN': ['快速的、迅速的', '提取重要线索'],
-    'zh-TW': ['快速的、迅速的', '提取重要線索'],
-    ko: ['빠른, 신속한', '중요한 단서를 추출하다'],
-    es: ['rápido, veloz', 'extraer pistas vitales'],
-    fr: ['rapide, véloce', 'extraire des indices vitaux'],
-    de: ['schnell, rasch', 'wichtige Hinweise extrahieren'],
+    ja: {
+      system:
+        'あなたは英和辞典です。与えられた英語の簡潔な日本語訳のみを出力してください。英単語や類義語、説明文は絶対に出力しないでください。',
+      formatUser: (term) => `「${term}」の日本語訳:`,
+      ex1: '急速な、速い',
+      ex2: '重要な手がかりを抽出する',
+    },
+    'zh-CN': {
+      system:
+        '你是一本英汉词典。请只输出所给英文的简短中文翻译，绝对不要输出英文单词、同义词或解释。',
+      formatUser: (term) => `“${term}”的中文翻译:`,
+      ex1: '快速的、迅速的',
+      ex2: '提取重要线索',
+    },
+    'zh-TW': {
+      system:
+        '你是一本英漢詞典。請只輸出所給英文的簡短繁體中文翻譯，絕對不要輸出英文單詞、同義詞或解釋。',
+      formatUser: (term) => `「${term}」的中文翻譯:`,
+      ex1: '快速的、迅速的',
+      ex2: '提取重要線索',
+    },
+    ko: {
+      system:
+        '당신은 영한사전입니다. 주어진 영어의 간결한 한국어 뜻만 출력하세요. 영단어나 유의어, 설명은 절대 출력하지 마세요.',
+      formatUser: (term) => `'${term}'의 한국어 뜻:`,
+      ex1: '빠른, 신속한',
+      ex2: '중요한 단서를 추출하다',
+    },
+    es: {
+      system:
+        'Eres un diccionario inglés-español. Escribe SOLO la traducción breve al español. Nunca escribas palabras en inglés ni explicaciones.',
+      formatUser: (term) => `Traducción al español de "${term}":`,
+      ex1: 'rápido, veloz',
+      ex2: 'extraer pistas vitales',
+    },
+    fr: {
+      system:
+        'Vous êtes un dictionnaire anglais-français. Donnez UNIQUEMENT la traduction courte en français. Ne donnez jamais de mots anglais ni d’explications.',
+      formatUser: (term) => `Traduction en français de « ${term} » :`,
+      ex1: 'rapide, véloce',
+      ex2: 'extraire des indices vitaux',
+    },
+    de: {
+      system:
+        'Du bist ein Englisch-Deutsch-Wörterbuch. Gib NUR die kurze deutsche Übersetzung aus. Gib niemals englische Wörter oder Erklärungen aus.',
+      formatUser: (term) => `Deutsche Übersetzung von „${term}“:`,
+      ex1: 'schnell, rasch',
+      ex2: 'wichtige Hinweise extrahieren',
+    },
   };
-  const [ex1, ex2] = examplesByLang[targetLang];
+
+  const tpl = localizedTemplates[targetLang];
 
   return [
     {
       role: 'system',
-      content: `You are an English-to-${englishName} dictionary. Output ONLY the concise ${englishName} translation. Never output English words or synonyms.`,
+      content: tpl.system,
     },
     {
       role: 'user',
-      content: 'rapid',
+      content: tpl.formatUser('rapid'),
     },
     {
       role: 'assistant',
-      content: ex1,
+      content: tpl.ex1,
     },
     {
       role: 'user',
-      content: 'extract vital cues',
+      content: tpl.formatUser('extract vital cues'),
     },
     {
       role: 'assistant',
-      content: ex2,
+      content: tpl.ex2,
     },
     {
       role: 'user',
-      content: cleanText,
+      content: tpl.formatUser(cleanText),
     },
   ];
 }
@@ -1785,8 +1803,7 @@ export async function translateSelection(params: {
       const engine = await initWebLlmEngine(modelId);
       const chatMessages = buildTranslationChatMessages(
         cleanText,
-        params.targetLang,
-        langInfo.englishName
+        params.targetLang
       );
       const reply = await engine.chat.completions.create({
         messages: chatMessages,
