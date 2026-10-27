@@ -60,6 +60,7 @@ import {
   checkCachedWebLlmModels,
   saveWebLlmModelSelection,
   TranslationLangCode,
+  getSavedLlmProvider,
   getSavedTranslationLang,
   getSavedCloudTranslationEnabled,
   translateSelection,
@@ -123,7 +124,7 @@ export function App() {
     getSavedCloudTranslationEnabled()
   );
   const [llmProvider, setLlmProvider] = useState<LlmProviderType>(
-    isWebGpuSupported() ? 'webllm' : 'rule_based'
+    () => getSavedLlmProvider() ?? (isWebGpuSupported() ? 'webllm' : 'rule_based')
   );
   const [selectedWebLlmModel, setSelectedWebLlmModel] =
     useState<WebLlmModelId>(DEFAULT_WEBLLM_MODEL);

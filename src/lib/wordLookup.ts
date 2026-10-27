@@ -5,7 +5,7 @@ export interface LexiconPopupState {
   words: string[];
   contextSentence: string;
   translation: string;
-  source?: 'webllm' | 'ollama' | 'cloud_dict';
+  source?: 'webllm' | 'chrome_ai' | 'chrome_translator' | 'ollama' | 'cloud_dict';
   loading: boolean;
   error?: string;
   anchorX: number;

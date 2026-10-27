@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Cpu,
   Eye,
@@ -10,15 +10,19 @@ import {
 } from 'lucide-react';
 import {
   checkCachedWebLlmModels,
+  checkChromePromptApiAvailability,
   initWebLlmEngine,
   isWebGpuSupported,
   isWebLlmReady,
   LlmProviderType,
   processPassageWithOptionalLlm,
+  promptChromeBuiltInAi,
   saveCloudTranslationEnabled,
+  saveLlmProviderSelection,
   saveTranslationLangSelection,
   saveWebLlmModelSelection,
   TRANSLATION_LANGUAGES,
+  translateWithChromeBuiltInTranslator,
   TranslationLangCode,
   WEBLLM_MODEL_OPTIONS,
   WebLlmModelId,
@@ -97,6 +101,18 @@ export function SystemSettingsModal({
     sampleAnswer: string;
     fallbackReason?: string;
   } | null>(null);
+  const [chromeAiStatus, setChromeAiStatus] = useState<string>(
+    'CHECKING CHROME BUILT-IN AI...'
+  );
+  const [isTestingChromeAi, setIsTestingChromeAi] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (llmProvider === 'chrome_ai') {
+      checkChromePromptApiAvailability().then((info) => {
+        setChromeAiStatus(info.detail);
+      });
+    }
+  }, [llmProvider]);
 
   return (
     <div className="fixed inset-0 z-[95] bg-[#0D0618]/85 backdrop-blur-xs overflow-y-auto flex items-center justify-center p-4">
@@ -221,11 +237,11 @@ export function SystemSettingsModal({
               <div className="pt-2 flex items-center justify-between gap-3">
                 <div>
                   <div className="text-[11px] text-[#F2F5F8] font-bold">
-                    EXTERNAL TRANSLATION API (CLOUD FALLBACK)
+                    EXTERNAL TRANSLATE SERVER API (CLOUD FALLBACK)
                   </div>
                   <div className="text-[10px] text-[#6C7A89]">
-                    Send tapped word/phrase to external REST dictionary when
-                    on-device LLM is not loaded. Default: OFF.
+                    Query Google Translate Server / MyMemory when local AI
+                    (WebLLM / Chrome Built-in AI) is unavailable. Default: OFF.
                   </div>
                 </div>
                 <button
@@ -249,7 +265,7 @@ export function SystemSettingsModal({
               </div>
             </div>
 
-            {/* On-Device LLM Pipeline (WebGPU WebLLM / Ollama / Rule-based) */}
+            {/* On-Device LLM Pipeline (WebGPU WebLLM / Chrome AI / Ollama / Rule-based) */}
             <div className="py-2 border-b border-[#6C7A89]/20 space-y-2.5">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -258,10 +274,11 @@ export function SystemSettingsModal({
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-1.5">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
                 {(
                   [
                     { id: 'webllm', label: 'WEBGPU (GEMMA)' },
+                    { id: 'chrome_ai', label: 'CHROME AI (NANO)' },
                     { id: 'ollama', label: 'OLLAMA API' },
                     { id: 'rule_based', label: 'RULE-BASED' },
                   ] as const
@@ -272,6 +289,7 @@ export function SystemSettingsModal({
                     onClick={() => {
                       soundEngine.playUiClick();
                       setLlmProvider(opt.id);
+                      saveLlmProviderSelection(opt.id);
                     }}
                     className={`cyber-btn py-1.5 px-2 border text-[10px] font-bold ${
                       llmProvider === opt.id
@@ -283,6 +301,76 @@ export function SystemSettingsModal({
                   </button>
                 ))}
               </div>
+
+              {llmProvider === 'chrome_ai' && (
+                <div className="p-2.5 bg-[#0D0618] border border-[#00F5D4]/40 space-y-2">
+                  <div className="flex items-center justify-between text-[10px]">
+                    <span className="text-[#00F5D4] font-bold">
+                      CHROME BUILT-IN AI (GEMINI NANO + TRANSLATOR)
+                    </span>
+                  </div>
+                  <div className="text-[10px] text-[#FFE600] break-words">
+                    STATUS: {chromeAiStatus}
+                  </div>
+                  <div className="text-[10px] text-[#6C7A89] leading-relaxed">
+                    Uses Chrome&apos;s built-in <code>LanguageModel</code>{' '}
+                    (Gemini Nano) for Cloze quiz synthesis and{' '}
+                    <code>Translator</code> API for zero-download on-device
+                    translation.
+                  </div>
+                  <button
+                    type="button"
+                    disabled={isTestingChromeAi}
+                    onClick={async () => {
+                      soundEngine.playUiClick();
+                      setIsTestingChromeAi(true);
+                      setChromeAiStatus('PROBING CHROME BUILT-IN AI...');
+                      try {
+                        const transOut =
+                          await translateWithChromeBuiltInTranslator(
+                            'rapid visual intake',
+                            translationLang
+                          );
+                        const promptAvail =
+                          await checkChromePromptApiAvailability();
+                        if (promptAvail.supported) {
+                          const nanoOut = await promptChromeBuiltInAi(
+                            'Reply with the single word: READY'
+                          );
+                          setChromeAiStatus(
+                            `GEMINI NANO OK ("${nanoOut
+                              .trim()
+                              .slice(0, 20)}")${
+                              transOut ? ` + TRANSLATOR OK ("${transOut}")` : ''
+                            }`
+                          );
+                          soundEngine.playQuizCorrect(false);
+                        } else if (transOut) {
+                          setChromeAiStatus(
+                            `CHROME TRANSLATOR OK ("${transOut}") // Gemini Nano: ${promptAvail.detail}`
+                          );
+                          soundEngine.playQuizCorrect(false);
+                        } else {
+                          setChromeAiStatus(promptAvail.detail);
+                        }
+                      } catch (e) {
+                        setChromeAiStatus(
+                          e instanceof Error
+                            ? e.message
+                            : 'Chrome AI probe failed'
+                        );
+                      } finally {
+                        setIsTestingChromeAi(false);
+                      }
+                    }}
+                    className="cyber-btn w-full py-1.5 bg-[#00F5D4]/15 border border-[#00F5D4] text-[#00F5D4] font-bold text-[10px] hover:bg-[#00F5D4]/25"
+                  >
+                    {isTestingChromeAi
+                      ? 'TESTING CHROME BUILT-IN AI...'
+                      : 'CHECK / WARM UP CHROME BUILT-IN AI'}
+                  </button>
+                </div>
+              )}
 
               {llmProvider === 'webllm' && (
                 <div className="p-2.5 bg-[#0D0618] border border-[#FFE600]/40 space-y-2.5">

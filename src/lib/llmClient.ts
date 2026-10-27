@@ -2,7 +2,30 @@ import type { MLCEngineInterface, InitProgressReport } from '@mlc-ai/web-llm';
 import { TrainingPassage, QuizQuestion } from '../types/schema';
 import { buildNormalizedPassage } from './chunker';
 
-export type LlmProviderType = 'webllm' | 'ollama' | 'rule_based';
+export type LlmProviderType = 'webllm' | 'chrome_ai' | 'ollama' | 'rule_based';
+
+const LLM_PROVIDER_STORAGE_KEY = 'wetware_llm_provider';
+
+export function getSavedLlmProvider(): LlmProviderType | null {
+  if (typeof window !== 'undefined') {
+    const saved = window.localStorage.getItem(LLM_PROVIDER_STORAGE_KEY);
+    if (
+      saved === 'webllm' ||
+      saved === 'chrome_ai' ||
+      saved === 'ollama' ||
+      saved === 'rule_based'
+    ) {
+      return saved;
+    }
+  }
+  return null;
+}
+
+export function saveLlmProviderSelection(provider: LlmProviderType): void {
+  if (typeof window !== 'undefined') {
+    window.localStorage.setItem(LLM_PROVIDER_STORAGE_KEY, provider);
+  }
+}
 
 export type WebLlmModelId =
   | 'gemma3-1b-it-q4f16_1-MLC'
@@ -913,6 +936,36 @@ export async function processPassageWithOptionalLlm(params: {
     }
   }
 
+  // Tier A2: Chrome Built-in AI (Gemini Nano via Prompt API: LanguageModel / window.ai.languageModel)
+  if (params.provider === 'chrome_ai') {
+    try {
+      params.onProgress?.('Querying Chrome Built-in AI (Gemini Nano)...');
+      const content = await promptChromeBuiltInAi(distractorPrompt);
+      const { updatedQuestions, appliedCount } = applyLlmDistractorsToQuestions(
+        basePassage.questions,
+        content
+      );
+      if (appliedCount === 0) {
+        const preview = content.replace(/\s+/g, ' ').trim().slice(0, 120);
+        throw new Error(
+          `No valid distractor words parsed from Gemini Nano | Raw: "${preview}"`
+        );
+      }
+      return {
+        passage: {
+          ...basePassage,
+          questions: updatedQuestions,
+        },
+        usedProvider: 'chrome_ai',
+      };
+    } catch (err) {
+      fallbackReason = err instanceof Error ? err.message : String(err);
+      params.onProgress?.(
+        `Chrome AI fallback (${fallbackReason}) -> using Rule-based Cloze...`
+      );
+    }
+  }
+
   // Tier B: Local Ollama / LM Studio HTTP Server
   if (params.provider === 'ollama' && params.llmEndpoint) {
     try {
@@ -984,9 +1037,326 @@ export async function processPassageWithOptionalLlm(params: {
 }
 
 /**
+ * Checks whether Chrome Built-in Prompt API (Gemini Nano) is available.
+ * Supports both the standard `LanguageModel` global (Chrome 138+) and
+ * legacy `self.ai.languageModel` (Chrome 127–137).
+ */
+export async function checkChromePromptApiAvailability(): Promise<{
+  supported: boolean;
+  status: 'available' | 'downloadable' | 'downloading' | 'unavailable';
+  detail: string;
+}> {
+  if (typeof self === 'undefined') {
+    return {
+      supported: false,
+      status: 'unavailable',
+      detail: 'Not in browser context',
+    };
+  }
+  const g = self as unknown as {
+    LanguageModel?: {
+      availability?: () => Promise<string>;
+      create?: (opts?: unknown) => Promise<{
+        prompt: (input: string) => Promise<string>;
+        destroy?: () => void;
+      }>;
+    };
+    ai?: {
+      languageModel?: {
+        capabilities?: () => Promise<{ available?: string }>;
+        create?: (opts?: unknown) => Promise<{
+          prompt: (input: string) => Promise<string>;
+          destroy?: () => void;
+        }>;
+      };
+    };
+  };
+
+  try {
+    if (g.LanguageModel && typeof g.LanguageModel.availability === 'function') {
+      const avail = await g.LanguageModel.availability();
+      if (avail === 'available' || avail === 'readily') {
+        return {
+          supported: true,
+          status: 'available',
+          detail: 'GEMINI NANO READY (LanguageModel API)',
+        };
+      }
+      if (avail === 'downloadable' || avail === 'after-download') {
+        return {
+          supported: true,
+          status: 'downloadable',
+          detail: 'GEMINI NANO DOWNLOADABLE ON DEMAND',
+        };
+      }
+      if (avail === 'downloading') {
+        return {
+          supported: true,
+          status: 'downloading',
+          detail: 'GEMINI NANO DOWNLOADING IN CHROME...',
+        };
+      }
+      return {
+        supported: false,
+        status: 'unavailable',
+        detail: `LanguageModel status: ${avail}`,
+      };
+    }
+
+    if (
+      g.ai?.languageModel &&
+      typeof g.ai.languageModel.capabilities === 'function'
+    ) {
+      const caps = await g.ai.languageModel.capabilities();
+      const avail = caps?.available || 'no';
+      if (avail === 'readily' || avail === 'available') {
+        return {
+          supported: true,
+          status: 'available',
+          detail: 'GEMINI NANO READY (window.ai.languageModel)',
+        };
+      }
+      if (avail === 'after-download' || avail === 'downloadable') {
+        return {
+          supported: true,
+          status: 'downloadable',
+          detail: 'GEMINI NANO DOWNLOADABLE ON DEMAND',
+        };
+      }
+      return {
+        supported: false,
+        status: 'unavailable',
+        detail: `window.ai.languageModel status: ${avail}`,
+      };
+    }
+  } catch (err) {
+    return {
+      supported: false,
+      status: 'unavailable',
+      detail: err instanceof Error ? err.message : 'Prompt API check failed',
+    };
+  }
+
+  return {
+    supported: false,
+    status: 'unavailable',
+    detail:
+      'Chrome Prompt API not detected (Enable chrome://flags/#prompt-api-for-gemini-nano on Desktop Chrome)',
+  };
+}
+
+/**
+ * Runs a prompt on Chrome Built-in Gemini Nano (`LanguageModel` or `self.ai.languageModel`).
+ */
+export async function promptChromeBuiltInAi(
+  promptText: string,
+  systemInstruction?: string
+): Promise<string> {
+  const g = self as unknown as {
+    LanguageModel?: {
+      create: (opts?: unknown) => Promise<{
+        prompt: (input: string) => Promise<string>;
+        destroy?: () => void;
+      }>;
+    };
+    ai?: {
+      languageModel?: {
+        create: (opts?: unknown) => Promise<{
+          prompt: (input: string) => Promise<string>;
+          destroy?: () => void;
+        }>;
+      };
+    };
+  };
+
+  const createFn =
+    g.LanguageModel?.create?.bind(g.LanguageModel) ||
+    g.ai?.languageModel?.create?.bind(g.ai.languageModel);
+
+  if (!createFn) {
+    throw new Error(
+      'Chrome Built-in Prompt API (Gemini Nano) is not available in this browser.'
+    );
+  }
+
+  const session = await createFn(
+    systemInstruction
+      ? {
+          systemPrompt: systemInstruction,
+          initialPrompts: [{ role: 'system', content: systemInstruction }],
+        }
+      : undefined
+  );
+  try {
+    const fullPrompt = systemInstruction
+      ? `${systemInstruction}\n\n${promptText}`
+      : promptText;
+    return await session.prompt(fullPrompt);
+  } finally {
+    session.destroy?.();
+  }
+}
+
+const chromeTranslatorCache = new Map<
+  string,
+  { translate: (text: string) => Promise<string> }
+>();
+
+/**
+ * Translates text using Chrome's Built-in On-Device Translator API (`Translator` / `window.ai.translator`)
+ * if available in the browser. Returns null if unsupported.
+ */
+export async function translateWithChromeBuiltInTranslator(
+  text: string,
+  targetLang: TranslationLangCode
+): Promise<string | null> {
+  if (typeof self === 'undefined') return null;
+
+  const cached = chromeTranslatorCache.get(targetLang);
+  if (cached) {
+    try {
+      const out = await cached.translate(text);
+      if (out?.trim()) return out.trim();
+    } catch {
+      chromeTranslatorCache.delete(targetLang);
+    }
+  }
+
+  const g = self as unknown as {
+    Translator?: {
+      availability?: (opts: {
+        sourceLanguage: string;
+        targetLanguage: string;
+      }) => Promise<string>;
+      create?: (opts: {
+        sourceLanguage: string;
+        targetLanguage: string;
+      }) => Promise<{ translate: (input: string) => Promise<string> }>;
+    };
+    ai?: {
+      translator?: {
+        create?: (opts: {
+          sourceLanguage: string;
+          targetLanguage: string;
+        }) => Promise<{ translate: (input: string) => Promise<string> }>;
+      };
+    };
+    translation?: {
+      createTranslator?: (opts: {
+        sourceLanguage: string;
+        targetLanguage: string;
+      }) => Promise<{ translate: (input: string) => Promise<string> }>;
+    };
+  };
+
+  try {
+    if (g.Translator && typeof g.Translator.create === 'function') {
+      if (typeof g.Translator.availability === 'function') {
+        const avail = await g.Translator.availability({
+          sourceLanguage: 'en',
+          targetLanguage: targetLang,
+        });
+        if (avail === 'unavailable' || avail === 'no') return null;
+      }
+      const instance = await g.Translator.create({
+        sourceLanguage: 'en',
+        targetLanguage: targetLang,
+      });
+      chromeTranslatorCache.set(targetLang, instance);
+      const out = await instance.translate(text);
+      if (out?.trim()) return out.trim();
+    }
+
+    const legacyCreate =
+      g.ai?.translator?.create?.bind(g.ai.translator) ||
+      g.translation?.createTranslator?.bind(g.translation);
+    if (legacyCreate) {
+      const instance = await legacyCreate({
+        sourceLanguage: 'en',
+        targetLanguage: targetLang,
+      });
+      chromeTranslatorCache.set(targetLang, instance);
+      const out = await instance.translate(text);
+      if (out?.trim()) return out.trim();
+    }
+  } catch {
+    // Built-in Translator not available or language pack not ready
+  }
+  return null;
+}
+
+/**
+ * Translates via Google Translate Server (`translate.googleapis.com/translate_a/single`)
+ * with dictionary part-of-speech lookup (`dt=bd`) for single words, falling back to MyMemory.
+ */
+async function translateViaCloudServer(
+  cleanText: string,
+  targetLang: TranslationLangCode
+): Promise<string> {
+  // 1. Primary: Google Translate Server API (supports dictionary meanings on single words via dt=bd)
+  try {
+    const gUrl = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=${encodeURIComponent(
+      targetLang
+    )}&dt=t&dt=bd&q=${encodeURIComponent(cleanText)}`;
+    const gRes = await fetch(gUrl);
+    if (gRes.ok) {
+      const gData = await gRes.json();
+      const primarySegments: string[] = Array.isArray(gData?.[0])
+        ? gData[0]
+            .map((seg: unknown) => (Array.isArray(seg) ? String(seg[0] || '') : ''))
+            .filter(Boolean)
+        : [];
+      const primaryText = primarySegments.join('').trim();
+
+      // If single word and dictionary terms exist in gData[1], include up to 2 concise dictionary senses
+      const dictTerms: string[] = [];
+      if (!/\s/.test(cleanText) && Array.isArray(gData?.[1])) {
+        for (const posEntry of gData[1]) {
+          if (Array.isArray(posEntry?.[1])) {
+            for (const wordSense of posEntry[1].slice(0, 2)) {
+              if (
+                typeof wordSense === 'string' &&
+                wordSense.trim() &&
+                wordSense.trim() !== primaryText &&
+                !dictTerms.includes(wordSense.trim())
+              ) {
+                dictTerms.push(wordSense.trim());
+              }
+            }
+          }
+        }
+      }
+
+      if (primaryText) {
+        return dictTerms.length > 0
+          ? `${primaryText} (${dictTerms.slice(0, 2).join(', ')})`
+          : primaryText;
+      }
+    }
+  } catch {
+    // Fall back to MyMemory below
+  }
+
+  // 2. Secondary Fallback: MyMemory API
+  const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(
+    cleanText
+  )}&langpair=en|${encodeURIComponent(targetLang)}`;
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error(`Translation request failed (${res.status})`);
+  }
+  const data = await res.json();
+  const translated: string = data?.responseData?.translatedText || '';
+  if (!translated) {
+    throw new Error('No translation returned');
+  }
+  return translated;
+}
+
+/**
  * Translates a selected word or phrase into the user's configured target language.
- * - Uses in-browser WebLLM (if provider === 'webllm' and loaded in VRAM) or Ollama (if provider === 'ollama').
- * - Only uses the external translation API if the user explicitly enabled `allowCloudApi` in CONFIG (default OFF).
+ * - Uses Chrome Built-in AI (`Translator` API or Gemini Nano `LanguageModel`), in-browser WebLLM, or Ollama.
+ * - When local engines are unavailable and `allowCloudApi` is enabled in CONFIG, queries Google Translate Server / MyMemory.
  */
 export async function translateSelection(params: {
   text: string;
@@ -999,7 +1369,7 @@ export async function translateSelection(params: {
   allowCloudApi?: boolean;
 }): Promise<{
   translation: string;
-  source: 'webllm' | 'ollama' | 'cloud_dict';
+  source: 'webllm' | 'chrome_ai' | 'chrome_translator' | 'ollama' | 'cloud_dict';
 }> {
   const cleanText = params.text.trim();
   const langInfo =
@@ -1018,7 +1388,30 @@ export async function translateSelection(params: {
     langInfo.englishName
   } meaning:`;
 
-  // 1. If WebLLM is selected AND already loaded in VRAM, run on-device translation
+  // 1. If Chrome Built-in AI is selected, try Chrome Translator API first, then Gemini Nano Prompt API
+  if (params.provider === 'chrome_ai') {
+    const builtInTrans = await translateWithChromeBuiltInTranslator(
+      cleanText,
+      params.targetLang
+    );
+    if (builtInTrans) {
+      return { translation: builtInTrans, source: 'chrome_translator' };
+    }
+    try {
+      const raw = await promptChromeBuiltInAi(prompt, systemInstruction);
+      const out = raw
+        .split('\n')[0]
+        .replace(/^["'`]+|["'`]+$/g, '')
+        .trim();
+      if (out) {
+        return { translation: out, source: 'chrome_ai' };
+      }
+    } catch {
+      // Fall through if permitted
+    }
+  }
+
+  // 2. If WebLLM is selected AND already loaded in VRAM, run on-device translation
   if (params.provider === 'webllm' && isWebLlmReady(params.webLlmModel)) {
     try {
       const engine = await initWebLlmEngine(
@@ -1046,7 +1439,7 @@ export async function translateSelection(params: {
     }
   }
 
-  // 2. If Ollama is selected
+  // 3. If Ollama is selected
   if (params.provider === 'ollama' && params.llmEndpoint) {
     try {
       const base = params.llmEndpoint.replace(/\/$/, '');
@@ -1089,25 +1482,24 @@ export async function translateSelection(params: {
     }
   }
 
-  // 3. External Translation API (Strictly Opt-In; Default OFF)
+  // 4. Automatic On-Device Fallback: Even if WebLLM isn't loaded into VRAM yet,
+  // check if Chrome's Built-in On-Device Translator API is available locally!
+  const localBrowserTranslator = await translateWithChromeBuiltInTranslator(
+    cleanText,
+    params.targetLang
+  );
+  if (localBrowserTranslator) {
+    return { translation: localBrowserTranslator, source: 'chrome_translator' };
+  }
+
+  // 5. External Translate Server API (Google Translate Server + MyMemory; Opt-In Default OFF)
   if (!params.allowCloudApi) {
     throw new Error(
-      'Translation engine offline. Please load an on-device LLM into VRAM or enable the External Translation API in CONFIG.'
+      'Local AI offline. Enable Chrome Built-in AI, load a WebGPU LLM, or turn ON "External Translate Server API" in CONFIG.'
     );
   }
 
-  const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(
-    cleanText
-  )}&langpair=en|${encodeURIComponent(params.targetLang)}`;
-  const res = await fetch(url);
-  if (!res.ok) {
-    throw new Error(`Translation request failed (${res.status})`);
-  }
-  const data = await res.json();
-  const translated: string = data?.responseData?.translatedText || '';
-  if (!translated) {
-    throw new Error('No translation returned');
-  }
+  const translated = await translateViaCloudServer(cleanText, params.targetLang);
   return {
     translation: translated,
     source: 'cloud_dict',
