@@ -46,19 +46,41 @@ interface ReadingScreenProps {
 }
 
 function renderRsvpChunk(chunk: string) {
-  const cleanLength = chunk.length;
-  const pivotIdx = Math.max(0, Math.floor(cleanLength * 0.33));
-  const before = chunk.slice(0, pivotIdx);
-  const pivot = chunk.charAt(pivotIdx);
-  const after = chunk.slice(pivotIdx + 1);
+  const trimmed = chunk.trim();
+  const cleanLength = trimmed.length;
+  if (cleanLength === 0) return null;
+
+  // Place pivot near ~44% of chunk length so left & right halves stay balanced
+  // inside the centered reticle, and ensure pivot never lands on a whitespace char.
+  let pivotIdx = Math.max(0, Math.min(cleanLength - 1, Math.floor(cleanLength * 0.44)));
+  if (trimmed[pivotIdx] === ' ') {
+    if (pivotIdx + 1 < cleanLength && trimmed[pivotIdx + 1] !== ' ') {
+      pivotIdx += 1;
+    } else if (pivotIdx - 1 >= 0 && trimmed[pivotIdx - 1] !== ' ') {
+      pivotIdx -= 1;
+    }
+  }
+
+  const before = trimmed.slice(0, pivotIdx);
+  const pivot = trimmed.charAt(pivotIdx);
+  const after = trimmed.slice(pivotIdx + 1);
+
+  const sizeClass =
+    cleanLength > 24
+      ? 'text-lg sm:text-3xl'
+      : cleanLength > 17
+      ? 'text-xl sm:text-4xl'
+      : 'text-2xl sm:text-5xl';
 
   return (
-    <div className="font-terminal text-3xl sm:text-5xl font-bold tracking-wide select-none flex items-center justify-center">
-      <span className="text-[#F2F5F8] text-right min-w-[7ch]">{before}</span>
-      <span className="text-[#FF1E7A] underline decoration-[#FF1E7A] underline-offset-8 px-0.5">
+    <div
+      className={`font-terminal ${sizeClass} font-bold tracking-wide select-none w-full grid grid-cols-[1fr_auto_1fr] items-baseline overflow-hidden`}
+    >
+      <span className="text-[#F2F5F8] text-right whitespace-pre">{before}</span>
+      <span className="text-[#FF1E7A] border-b-2 border-[#FF1E7A] pb-0.5 whitespace-pre">
         {pivot}
       </span>
-      <span className="text-[#F2F5F8] text-left min-w-[10ch]">{after}</span>
+      <span className="text-[#F2F5F8] text-left whitespace-pre">{after}</span>
     </div>
   );
 }
