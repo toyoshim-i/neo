@@ -17,6 +17,7 @@ import {
   LlmProviderType,
   processPassageWithOptionalLlm,
   promptChromeBuiltInAi,
+  purgeWebLlmDiskCache,
   saveCloudTranslationEnabled,
   saveLlmProviderSelection,
   saveTranslationLangSelection,
@@ -376,14 +377,14 @@ export function SystemSettingsModal({
                 <div className="p-2.5 bg-[#0D0618] border border-[#FFE600]/40 space-y-2.5">
                   <div className="flex items-center justify-between text-[10px]">
                     <span className="text-[#6C7A89]">
-                      SELECT WEBGPU MODEL (BONSAI 1-BIT / GEMMA FP32)
+                      SELECT WEBGPU MODEL (256-CTX COMPACT VRAM)
                     </span>
                     <span className="text-[#00F5D4] font-bold">
                       {isWebGpuSupported() ? 'WEBGPU OK' : 'NO WEBGPU'}
                     </span>
                   </div>
 
-                  {/* WebGPU Model Selector (Bonsai 1-bit / Ternary 1.58-bit / Gemma FP32) */}
+                  {/* WebGPU Model Selector (Qwen3 No-Think / Qwen2.5 / Gemma FP32) */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                     {WEBLLM_MODEL_OPTIONS.map((m) => {
                       const active = selectedWebLlmModel === m.id;
@@ -401,7 +402,7 @@ export function SystemSettingsModal({
                               isWebLlmReady(m.id)
                                 ? 'READY IN VRAM'
                                 : isCached
-                                ? 'CACHED ON DISK (READY TO LOAD)'
+                                ? 'CACHED ON DISK (0 MB RAM UNTIL LOADED)'
                                 : 'NOT DOWNLOADED'
                             );
                           }}
@@ -425,8 +426,24 @@ export function SystemSettingsModal({
                     })}
                   </div>
 
-                  <div className="text-[10px] text-[#FFE600] truncate">
-                    STATUS: {webLlmStatus}
+                  <div className="flex items-center justify-between gap-2 text-[10px]">
+                    <span className="text-[#FFE600] truncate">
+                      STATUS: {webLlmStatus}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={isPreloadingWebLlm}
+                      onClick={async () => {
+                        soundEngine.playUiClick();
+                        await purgeWebLlmDiskCache();
+                        const updatedCache = await checkCachedWebLlmModels();
+                        setCachedModels(updatedCache);
+                        setWebLlmStatus('DISK CACHE PURGED & VRAM UNLOADED');
+                      }}
+                      className="text-[9px] text-[#6C7A89] hover:text-[#FF1E7A] underline shrink-0 cursor-pointer"
+                    >
+                      PURGE DISK CACHE
+                    </button>
                   </div>
                   <button
                     type="button"
