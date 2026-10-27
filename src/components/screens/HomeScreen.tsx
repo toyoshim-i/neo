@@ -7,6 +7,7 @@ import {
   X,
   Zap,
 } from 'lucide-react';
+import { CoachPrescription } from '../../lib/metrics';
 import { AppExperienceMode, MODE_INFO } from '../../lib/pacing';
 import { soundEngine } from '../../lib/soundEngine';
 import {
@@ -19,6 +20,7 @@ import { ChamferedPanel } from '../layout/ChamferedPanel';
 interface HomeScreenProps {
   appMode: AppExperienceMode;
   profile: UserProfile;
+  coachPrescription: CoachPrescription;
   selectedMode: TrainingMode;
   setSelectedMode: (mode: TrainingMode) => void;
   targetWpm: number;
@@ -42,6 +44,7 @@ interface HomeScreenProps {
 export function HomeScreen({
   appMode,
   profile,
+  coachPrescription,
   selectedMode,
   setSelectedMode,
   targetWpm,
@@ -135,7 +138,7 @@ export function HomeScreen({
         tag={appMode === 'guided' ? 'COACH PRESCRIPTION' : 'STEP 01'}
         title={
           appMode === 'guided'
-            ? 'RECOMMENDED STAGE & SPEED (ADJUSTABLE)'
+            ? 'ADAPTIVE 3-MODE ROTATION & SPEED (ADJUSTABLE)'
             : 'TRAINING MODE & SPEED'
         }
       >
@@ -143,62 +146,70 @@ export function HomeScreen({
           {appMode === 'guided' &&
             (() => {
               const rec = profile.passageRecords?.[selectedPassage.id];
-              const stageNum = rec ? Math.min(3, rec.stageCompleted + 1) : 1;
-              const isMastered = (rec?.stageCompleted || 0) >= 3;
               return (
-                <div className="p-3 bg-[#0D0618] border border-[#00F5D4]/40 space-y-2">
+                <div className="p-3.5 bg-[#0D0618] border border-[#00F5D4]/40 space-y-2.5">
                   <div className="flex flex-wrap items-center justify-between gap-2 font-terminal text-xs">
                     <span className="text-[#00F5D4] font-bold">
-                      {isMastered
-                        ? '★ PASSAGE MASTERED (OVERCLOCK TIER)'
-                        : `GUIDED STAGE ${stageNum} OF 3 // ${
-                            stageNum === 1
-                              ? 'SEMANTIC CHUNK INTAKE'
-                              : stageNum === 2
-                              ? 'PERIPHERAL PACER (NO REGRESSION)'
-                              : '4/3/2 TIME COMPRESSION OVERCLOCK'
-                          }`}
+                      TARGET AXIS // {coachPrescription.bottleneckLabel}
                     </span>
                     <span className="text-[11px] text-[#FFE600]">
                       {rec && rec.attempts > 0
-                        ? `PASSAGE BEST: ${rec.bestEffectiveWpm} eWPM`
+                        ? `PASSAGE BEST: ${rec.bestEffectiveWpm} eWPM (${rec.attempts} RUNS)`
                         : 'NEW PASSAGE (85% TRANSFER PACE)'}
                     </span>
                   </div>
-                  <div className="grid grid-cols-3 gap-1.5 font-terminal text-[10px]">
-                    <div
-                      className={`p-1.5 border text-center ${
-                        stageNum === 1 && !isMastered
-                          ? 'border-[#00F5D4] bg-[#00F5D4]/15 text-[#00F5D4] font-bold'
-                          : (rec?.stageCompleted || 0) >= 1
-                          ? 'border-[#00F5D4]/40 bg-[#180B29] text-[#00F5D4]'
-                          : 'border-[#6C7A89]/30 bg-[#0D0618] text-[#6C7A89]'
-                      }`}
-                    >
-                      {(rec?.stageCompleted || 0) >= 1 ? '✓ ' : ''}STAGE 1:
-                      CHUNK
-                    </div>
-                    <div
-                      className={`p-1.5 border text-center ${
-                        stageNum === 2 && !isMastered
-                          ? 'border-[#FFE600] bg-[#FFE600]/15 text-[#FFE600] font-bold'
-                          : (rec?.stageCompleted || 0) >= 2
-                          ? 'border-[#00F5D4]/40 bg-[#180B29] text-[#00F5D4]'
-                          : 'border-[#6C7A89]/30 bg-[#0D0618] text-[#6C7A89]'
-                      }`}
-                    >
-                      {(rec?.stageCompleted || 0) >= 2 ? '✓ ' : ''}STAGE 2:
-                      PACER
-                    </div>
-                    <div
-                      className={`p-1.5 border text-center ${
-                        stageNum === 3 || isMastered
-                          ? 'border-[#FF1E7A] bg-[#FF1E7A]/15 text-[#FF1E7A] font-bold'
-                          : 'border-[#6C7A89]/30 bg-[#0D0618] text-[#6C7A89]'
-                      }`}
-                    >
-                      {isMastered ? '★ MASTERED' : 'STAGE 3: 4/3/2'}
-                    </div>
+                  <p className="text-[11px] text-[#F2F5F8]/90 leading-relaxed">
+                    {coachPrescription.rationale}
+                  </p>
+                  <div className="grid grid-cols-3 gap-1.5 font-terminal text-[10px] pt-0.5">
+                    {(
+                      [
+                        {
+                          mode: 'chunk_pacer',
+                          label: '01 // CHUNK PACER',
+                          sub: 'FLOW & SYNC',
+                        },
+                        {
+                          mode: 'rsvp',
+                          label: '02 // RSVP STREAM',
+                          sub: 'ORP THROUGHPUT',
+                        },
+                        {
+                          mode: 'tachistoscope',
+                          label: '03 // TACHISTOSCOPE',
+                          sub: 'FLASH SPAN',
+                        },
+                      ] as const
+                    ).map((item) => {
+                      const isPrescribed =
+                        coachPrescription.nextMode === item.mode;
+                      const isSelected = selectedMode === item.mode;
+                      return (
+                        <button
+                          key={item.mode}
+                          type="button"
+                          onClick={() => {
+                            soundEngine.playUiClick();
+                            setSelectedMode(item.mode);
+                          }}
+                          className={`p-2 border text-center transition-all cursor-pointer ${
+                            isSelected
+                              ? 'border-[#00F5D4] bg-[#00F5D4]/15 text-[#00F5D4] font-bold'
+                              : isPrescribed
+                              ? 'border-[#FFE600]/70 bg-[#180B29] text-[#FFE600]'
+                              : 'border-[#6C7A89]/30 bg-[#0D0618] text-[#6C7A89] hover:text-[#F2F5F8]'
+                          }`}
+                        >
+                          <div>
+                            {isPrescribed ? '★ ' : ''}
+                            {item.label}
+                          </div>
+                          <div className="text-[9px] opacity-80 mt-0.5">
+                            {item.sub}
+                          </div>
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               );

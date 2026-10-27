@@ -28,6 +28,8 @@ import {
 import {
   FiveAxisMetrics,
   computeNextTargetWpm,
+  computeGuidedCoachPrescription,
+  summarizeSessionMetrics,
 } from './lib/metrics';
 import {
   db,
@@ -259,7 +261,17 @@ export function App() {
     ? CALIBRATION_PASSAGE
     : allPassages.find((p) => p.id === selectedPassageId) || PRESET_PASSAGES[0];
 
-  // Apply Guided Curriculum Stage & Speed for a target passage
+  // Compute Weakness-Driven 3-Mode Coach Prescription (`chunk_pacer` / `rsvp` / `tachistoscope`)
+  const latestMetricsForCoach =
+    lastSessionMetrics ||
+    (sessionHistory[0] ? summarizeSessionMetrics(sessionHistory[0]) : null);
+  const recentModesForCoach = sessionHistory.slice(0, 4).map((s) => s.mode);
+  const coachPrescription = computeGuidedCoachPrescription({
+    lastMetrics: latestMetricsForCoach,
+    recentModes: recentModesForCoach,
+  });
+
+  // Apply Guided Curriculum Mode Rotation & Speed for a target passage
   const applyGuidedRecommendationForPassage = useCallback(
     (passageId: string, prof: UserProfile, referenceCurrentWpm: number) => {
       const rec = prof.passageRecords?.[passageId];
@@ -270,16 +282,6 @@ export function App() {
           rec.bestRawWpm || rec.lastTargetWpm || rec.bestEffectiveWpm || baseline
         );
         setTargetWpm(resumeWpm);
-        if (rec.stageCompleted === 0) {
-          setSelectedMode('chunk_pacer');
-          setFadeOutPassed(false);
-        } else if (rec.stageCompleted === 1) {
-          setSelectedMode('chunk_pacer');
-          setFadeOutPassed(true);
-        } else {
-          setSelectedMode('overclock_432');
-          setFadeOutPassed(true);
-        }
       } else {
         const hasAnyPriorPassage =
           Object.keys(prof.passageRecords || {}).length > 0;
@@ -287,11 +289,11 @@ export function App() {
           ? Math.max(80, Math.round(referenceCurrentWpm * 0.85))
           : baseline;
         setTargetWpm(transferWpm);
-        setSelectedMode('chunk_pacer');
-        setFadeOutPassed(false);
       }
+      setSelectedMode(coachPrescription.nextMode);
+      setFadeOutPassed(coachPrescription.fadeOutPassed);
     },
-    []
+    [coachPrescription.nextMode, coachPrescription.fadeOutPassed]
   );
 
   const selectPassageWithCoaching = useCallback(
@@ -642,6 +644,18 @@ export function App() {
       );
       setTargetWpm(nextWpm);
 
+      if (appMode === 'guided') {
+        const nextRx = computeGuidedCoachPrescription({
+          lastMetrics: metrics,
+          recentModes: [
+            selectedMode,
+            ...sessionHistory.slice(0, 3).map((s) => s.mode),
+          ],
+        });
+        setSelectedMode(nextRx.nextMode);
+        setFadeOutPassed(nextRx.fadeOutPassed);
+      }
+
       if (beatOverall || beatPassage) {
         soundEngine.playRecordBreakerFanfare();
         window.setTimeout(() => setJuiceShake(true), 40);
@@ -652,6 +666,7 @@ export function App() {
       setScreen('result');
     },
     [
+      appMode,
       isCalibratingSession,
       measuredCalibrationRawWpm,
       targetWpm,
@@ -659,6 +674,7 @@ export function App() {
       totalSteps,
       regressionCount,
       selectedMode,
+      sessionHistory,
     ]
   );
 
@@ -1083,6 +1099,7 @@ export function App() {
         <HomeScreen
           appMode={appMode}
           profile={profile}
+          coachPrescription={coachPrescription}
           selectedMode={selectedMode}
           setSelectedMode={setSelectedMode}
           targetWpm={targetWpm}
@@ -1181,6 +1198,7 @@ export function App() {
         <ResultScreen
           appMode={appMode}
           lastSessionMetrics={lastSessionMetrics}
+          coachPrescription={coachPrescription}
           targetWpm={targetWpm}
           setTargetWpm={setTargetWpm}
           profile={profile}
@@ -1189,18 +1207,10 @@ export function App() {
           isNewPassageBest={isNewPassageBest}
           previousPassageBest={previousPassageBest}
           newlyUnlockedAchievements={newlyUnlockedAchievements}
-          onTrainSamePassage={(nextGuidedStage) => {
+          onTrainSamePassage={(nextMode, nextFadeOut) => {
             if (appMode === 'guided') {
-              if (nextGuidedStage === 1) {
-                setSelectedMode('chunk_pacer');
-                setFadeOutPassed(false);
-              } else if (nextGuidedStage === 2) {
-                setSelectedMode('chunk_pacer');
-                setFadeOutPassed(true);
-              } else {
-                setSelectedMode('overclock_432');
-                setFadeOutPassed(true);
-              }
+              setSelectedMode(nextMode);
+              setFadeOutPassed(nextFadeOut);
             }
             startReadingSession();
           }}

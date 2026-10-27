@@ -53,28 +53,32 @@ export function TitleScreen({
         >
           <div className="p-5 space-y-4">
             <p className="text-xs sm:text-sm text-[#F2F5F8] leading-relaxed">
-              Automatically paces your speed and reading mode based on
-              second-language fluency science:
+              Diagnoses your 5-axis reading telemetry after every session and
+              dynamically rotates the optimal engine while ramping up WPM:
             </p>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 font-terminal text-[11px]">
               <div className="p-2.5 bg-[#0D0618] border border-[#00F5D4]/30">
-                <div className="text-[#00F5D4] font-bold">STAGE 1: CHUNK</div>
+                <div className="text-[#00F5D4] font-bold">
+                  01 // CHUNK PACER
+                </div>
                 <div className="text-[#6C7A89] mt-0.5">
-                  Absorb meaning &amp; vocabulary at comfortable speed.
+                  Targets semantic sync &amp; forward flow (anti-regression).
                 </div>
               </div>
               <div className="p-2.5 bg-[#0D0618] border border-[#00F5D4]/30">
-                <div className="text-[#FFE600] font-bold">STAGE 2: PACER</div>
+                <div className="text-[#FFE600] font-bold">
+                  02 // RSVP STREAM
+                </div>
                 <div className="text-[#6C7A89] mt-0.5">
-                  Fade passed chunks to eliminate backward regressions.
+                  Locks ORP reticle to suppress inner speech &amp; boost WPM.
                 </div>
               </div>
               <div className="p-2.5 bg-[#0D0618] border border-[#00F5D4]/30">
                 <div className="text-[#FF1E7A] font-bold">
-                  STAGE 3: OVERCLOCK
+                  03 // TACHISTOSCOPE
                 </div>
                 <div className="text-[#6C7A89] mt-0.5">
-                  4/3/2 time compression to break inner speech limits.
+                  Flashes peripheral chunks to compress fixation latency.
                 </div>
               </div>
             </div>

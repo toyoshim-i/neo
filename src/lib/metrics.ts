@@ -115,22 +115,22 @@ export function calculateHumanBenchmark(
     recommendedMode = 'tachistoscope';
     diagnosisText =
       'Bottleneck: Fixation speed. Use TACHISTOSCOPE FLASH to compress per-chunk recognition time.';
+  } else if (weakestAxis === 'perceptualSpan') {
+    recommendedMode = 'tachistoscope';
+    diagnosisText =
+      'Bottleneck: Perceptual span. Use TACHISTOSCOPE FLASH to expand multi-word peripheral intake.';
   } else if (weakestAxis === 'forwardFlowRate') {
     recommendedMode = 'chunk_pacer';
     diagnosisText =
       'Bottleneck: Regression rate. Use CHUNK PACER with Fade-Out enabled to eliminate backward saccades.';
-  } else if (weakestAxis === 'perceptualSpan') {
-    recommendedMode = 'rsvp';
-    diagnosisText =
-      'Bottleneck: Perceptual span. Use RSVP STREAM to process multi-word units at a fixed pivot.';
   } else if (weakestAxis === 'syncRate') {
     recommendedMode = 'chunk_pacer';
     diagnosisText =
       'Bottleneck: Semantic retention. Consolidate comprehension in CHUNK PACER before pushing clock rate.';
   } else {
-    recommendedMode = 'overclock_432';
+    recommendedMode = 'rsvp';
     diagnosisText =
-      'Bottleneck: Raw throughput ceiling. Engage 4/3/2 OVERCLOCK time-compression passes.';
+      'Bottleneck: Subvocalization & saccade latency. Use RSVP STREAM at the ORP reticle to push throughput.';
   }
 
   return {
@@ -142,6 +142,157 @@ export function calculateHumanBenchmark(
     weakestAxis,
     recommendedMode,
     diagnosisText,
+  };
+}
+
+export type CoachRotationMode = 'chunk_pacer' | 'rsvp' | 'tachistoscope';
+
+export interface CoachPrescription {
+  nextMode: CoachRotationMode;
+  fadeOutPassed: boolean;
+  weakestAxis: keyof FiveAxisMetrics;
+  bottleneckLabel: string;
+  rationale: string;
+  axisScores: Record<keyof FiveAxisMetrics, number>;
+}
+
+/**
+ * Selects the optimal next mode among the 3 core training engines
+ * (`chunk_pacer`, `rsvp`, `tachistoscope`) by analyzing the user's
+ * 5-axis weakness telemetry and enforcing anti-stagnation rotation.
+ */
+export function computeGuidedCoachPrescription(params: {
+  lastMetrics: FiveAxisMetrics | null;
+  recentModes: TrainingMode[];
+}): CoachPrescription {
+  const { lastMetrics, recentModes } = params;
+
+  if (!lastMetrics) {
+    return {
+      nextMode: 'chunk_pacer',
+      fadeOutPassed: false,
+      weakestAxis: 'effectiveWpm',
+      bottleneckLabel: 'INITIAL RHYTHM CALIBRATION',
+      rationale:
+        'Start with CHUNK PACER to establish semantic chunking rhythm before rotating into RSVP and Tachistoscope.',
+      axisScores: {
+        effectiveWpm: 50,
+        fixationMs: 50,
+        perceptualSpan: 50,
+        forwardFlowRate: 50,
+        syncRate: 50,
+      },
+    };
+  }
+
+  const axisScores: Record<keyof FiveAxisMetrics, number> = {
+    effectiveWpm: normalizeAxis(lastMetrics.effectiveWpm, 135, 238, 450),
+    fixationMs: normalizeInverseAxis(lastMetrics.fixationMs, 320, 225, 140),
+    perceptualSpan: normalizeAxis(lastMetrics.perceptualSpan, 1.2, 2.5, 4.5),
+    forwardFlowRate: normalizeAxis(lastMetrics.forwardFlowRate * 100, 75, 88, 98),
+    syncRate: normalizeAxis(lastMetrics.syncRate * 100, 65, 80, 95),
+  };
+
+  const lastMode = recentModes[0] || null;
+  const prevMode = recentModes[1] || null;
+
+  // If comprehension dropped below 65%, consolidate in CHUNK PACER first
+  if (lastMetrics.syncRate < 0.65 && lastMode !== 'chunk_pacer') {
+    return {
+      nextMode: 'chunk_pacer',
+      fadeOutPassed: lastMetrics.forwardFlowRate < 0.9,
+      weakestAxis: 'syncRate',
+      bottleneckLabel: 'SEMANTIC SYNC RECOVERY',
+      rationale:
+        'Comprehension dipped below threshold — rotating to CHUNK PACER to stabilize meaning retention.',
+      axisScores,
+    };
+  }
+
+  // Evaluate weakness need (lower score = higher priority) for each of the 3 modes:
+  // - chunk_pacer targets Forward Flow (regressions) & Comprehension Sync
+  // - rsvp targets Effective Throughput (subvocalization suppression) & Saccade Elimination
+  // - tachistoscope targets Fixation Speed (ms/chunk) & Perceptual Span (words/chunk)
+  const candidates: Array<{
+    mode: CoachRotationMode;
+    score: number;
+    weakestAxis: keyof FiveAxisMetrics;
+    bottleneckLabel: string;
+    rationale: string;
+  }> = [
+    {
+      mode: 'chunk_pacer',
+      score: Math.min(axisScores.forwardFlowRate, axisScores.syncRate),
+      weakestAxis:
+        axisScores.forwardFlowRate <= axisScores.syncRate
+          ? 'forwardFlowRate'
+          : 'syncRate',
+      bottleneckLabel:
+        axisScores.forwardFlowRate <= axisScores.syncRate
+          ? 'FORWARD GAZE FLOW (ANTI-REGRESSION)'
+          : 'SEMANTIC COMPREHENSION SYNC',
+      rationale:
+        axisScores.forwardFlowRate <= axisScores.syncRate
+          ? 'CHUNK PACER (with Fade-Out) trains steady left-to-right saccades without look-backs.'
+          : 'CHUNK PACER reinforces full-paragraph syntactic comprehension at your new clock speed.',
+    },
+    {
+      mode: 'rsvp',
+      score: Math.min(
+        axisScores.effectiveWpm,
+        Math.round((axisScores.effectiveWpm + axisScores.forwardFlowRate) / 2)
+      ),
+      weakestAxis: 'effectiveWpm',
+      bottleneckLabel: 'SUBVOCALIZATION & SACCADE CEILING',
+      rationale:
+        'RSVP STREAM locks your gaze to the Optimal Recognition Point (ORP) to bypass inner speech and accelerate WPM.',
+    },
+    {
+      mode: 'tachistoscope',
+      score: Math.min(axisScores.fixationMs, axisScores.perceptualSpan),
+      weakestAxis:
+        axisScores.fixationMs <= axisScores.perceptualSpan
+          ? 'fixationMs'
+          : 'perceptualSpan',
+      bottleneckLabel:
+        axisScores.fixationMs <= axisScores.perceptualSpan
+          ? 'FOVEAL FIXATION DURATION'
+          : 'PERIPHERAL VISUAL SPAN',
+      rationale:
+        axisScores.fixationMs <= axisScores.perceptualSpan
+          ? 'TACHISTOSCOPE flashes chunks briefly (140–250ms) to compress visual recognition latency.'
+          : 'TACHISTOSCOPE trains peripheral snapshot intake so you absorb 3–4 words in a single glance.',
+    },
+  ];
+
+  // Apply rotation penalties so Coach actively rotates across all 3 engines:
+  // - Never repeat `lastMode` back-to-back (+1000 penalty)
+  // - Gently penalize `prevMode` (+14 penalty) so the 3rd unplayed mode is favored when axis scores are close
+  const scoredCandidates = candidates
+    .map((c) => {
+      let effectiveScore = c.score;
+      if (c.mode === lastMode) {
+        effectiveScore += 1000;
+      } else if (c.mode === prevMode) {
+        effectiveScore += 14;
+      }
+      return { ...c, effectiveScore };
+    })
+    .sort((a, b) => a.effectiveScore - b.effectiveScore);
+
+  const chosen = scoredCandidates[0];
+  const fadeOutPassed =
+    chosen.mode === 'chunk_pacer'
+      ? lastMetrics.forwardFlowRate < 0.94 || recentModes.length >= 1
+      : true;
+
+  return {
+    nextMode: chosen.mode,
+    fadeOutPassed,
+    weakestAxis: chosen.weakestAxis,
+    bottleneckLabel: chosen.bottleneckLabel,
+    rationale: chosen.rationale,
+    axisScores,
   };
 }
 

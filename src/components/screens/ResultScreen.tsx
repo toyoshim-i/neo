@@ -2,10 +2,12 @@ import { Award, BookOpen, RotateCcw, Trophy } from 'lucide-react';
 import { ACHIEVEMENT_CATALOG } from '../../lib/db';
 import {
   calculateHumanBenchmark,
+  CoachPrescription,
+  CoachRotationMode,
   computeNextTargetWpm,
   FiveAxisMetrics,
 } from '../../lib/metrics';
-import { AppExperienceMode } from '../../lib/pacing';
+import { AppExperienceMode, MODE_INFO } from '../../lib/pacing';
 import { soundEngine } from '../../lib/soundEngine';
 import {
   AchievementId,
@@ -18,6 +20,7 @@ import { ChamferedPanel } from '../layout/ChamferedPanel';
 interface ResultScreenProps {
   appMode: AppExperienceMode;
   lastSessionMetrics: FiveAxisMetrics;
+  coachPrescription: CoachPrescription;
   targetWpm: number;
   setTargetWpm: (updater: (prev: number) => number) => void;
   profile: UserProfile;
@@ -26,13 +29,17 @@ interface ResultScreenProps {
   isNewPassageBest: boolean;
   previousPassageBest: number;
   newlyUnlockedAchievements: AchievementId[];
-  onTrainSamePassage: (nextGuidedStage: 1 | 2 | 3) => void;
+  onTrainSamePassage: (
+    nextMode: CoachRotationMode,
+    fadeOutPassed: boolean
+  ) => void;
   onSwitchPassage: () => void;
 }
 
 export function ResultScreen({
   appMode,
   lastSessionMetrics,
+  coachPrescription,
   targetWpm,
   setTargetWpm,
   profile,
@@ -59,8 +66,6 @@ export function ResultScreen({
   const flowPercent = Math.round(lastSessionMetrics.forwardFlowRate * 100);
   const rec = profile.passageRecords?.[selectedPassage.id];
   const stageCompleted = rec?.stageCompleted || 0;
-  const nextGuidedStage: 1 | 2 | 3 =
-    stageCompleted === 0 ? 1 : stageCompleted === 1 ? 2 : 3;
 
   return (
     <main className="flex-1 max-w-2xl w-full mx-auto px-4 py-8 flex flex-col justify-center space-y-5">
@@ -214,10 +219,14 @@ export function ResultScreen({
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
               <div>
                 <div className="font-terminal text-[#00F5D4] font-bold">
-                  COACH RECOMMENDATION: {status}
+                  COACH ROTATION: {MODE_INFO[coachPrescription.nextMode].label}{' '}
+                  // {status}
+                </div>
+                <div className="font-terminal text-[10px] text-[#FFE600] mt-0.5">
+                  TARGET BOTTLENECK: {coachPrescription.bottleneckLabel}
                 </div>
                 <div className="text-[#6C7A89] text-[11px] mt-0.5">
-                  {benchmark.diagnosisText}
+                  {coachPrescription.rationale}
                 </div>
               </div>
 
@@ -272,28 +281,23 @@ export function ResultScreen({
         </div>
       </ChamferedPanel>
 
-      {/* Primary Actions: Advance Guided Stage on Same Passage OR Switch Passage */}
+      {/* Primary Actions: Advance Guided Rotation on Same Passage OR Switch Passage */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <button
           type="button"
           onClick={() => {
             soundEngine.playUiClick();
-            onTrainSamePassage(nextGuidedStage);
+            onTrainSamePassage(
+              coachPrescription.nextMode,
+              coachPrescription.fadeOutPassed
+            );
           }}
           className="cyber-btn py-3.5 px-4 bg-[#00F5D4] text-[#0D0618] font-bold text-xs sm:text-sm flex items-center justify-center gap-2 hover:brightness-110 shadow-[0_0_20px_rgba(0,245,212,0.3)]"
         >
           <RotateCcw className="w-4 h-4" />
           <span>
             {appMode === 'guided'
-              ? stageCompleted >= 3
-                ? `OVERCLOCK AGAIN (${targetWpm} WPM)`
-                : `START STAGE ${nextGuidedStage}: ${
-                    nextGuidedStage === 1
-                      ? 'CHUNK'
-                      : nextGuidedStage === 2
-                      ? 'PACER'
-                      : '4/3/2 OVERCLOCK'
-                  } (${targetWpm} WPM)`
+              ? `NEXT ROTATION: ${MODE_INFO[coachPrescription.nextMode].label} (${targetWpm} WPM)`
               : `TRAIN SAME PASSAGE (${targetWpm} WPM)`}
           </span>
         </button>
