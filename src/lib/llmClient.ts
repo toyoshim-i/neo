@@ -172,16 +172,44 @@ function sanitizeTargetWord(raw: string): string {
 
 function buildDistractorPrompt(targetWords: string[]): string {
   const numbered = targetWords
-    .map((w, idx) => `${idx + 1}. ${sanitizeTargetWord(w)} ->`)
+    .slice(0, 3)
+    .map((w, idx) => `${idx + 1}. ${sanitizeTargetWord(w)}:`)
     .join('\n');
-  return `Write 3 related English words for each word below. Use commas.
+  return `Write 3 related English words (synonyms or same category, separated by commas) for each numbered word below. Output ONLY the numbered lines.
 
-1. velocity -> speed, motion, tempo
-2. cortical -> neural, cerebral, sensory
-3. painting -> sculpture, drawing, fresco
+Example:
+velocity -> speed, motion, tempo
 
-Now complete these 3 lines with 3 words on each line:
+Words:
 ${numbered}`;
+}
+
+function buildDistractorChatMessages(
+  targetWords: string[]
+): Array<{ role: 'system' | 'user' | 'assistant'; content: string }> {
+  const numbered = targetWords
+    .slice(0, 3)
+    .map((w, idx) => `${idx + 1}. ${sanitizeTargetWord(w)}:`)
+    .join('\n');
+  return [
+    {
+      role: 'system',
+      content:
+        'You generate 3 comma-separated English distractor words (synonyms or same category) for each numbered word. Output ONLY the numbered lines.',
+    },
+    {
+      role: 'user',
+      content: '1. velocity:\n2. painting:',
+    },
+    {
+      role: 'assistant',
+      content: '1. speed, motion, tempo\n2. sculpture, drawing, fresco',
+    },
+    {
+      role: 'user',
+      content: numbered,
+    },
+  ];
 }
 
 const PROMPT_STOPWORDS = new Set([
@@ -216,8 +244,9 @@ function applyLlmDistractorsToQuestions(
 ): { updatedQuestions: QuizQuestion[]; appliedCount: number } {
   const cleanedText = rawLlmText
     .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .replace(/<think>[\s\S]*$/gi, '')
     .replace(
-      /<\|thought\|>[\s\S]*?(?:<\|thought\|>|<\/thought>|<thought\|>)/gi,
+      /<\|thought\|>[\s\S]*?(?:<\|thought\|>|<\/thought>|<thought\|>|$)/gi,
       ''
     )
     .trim();
@@ -955,9 +984,10 @@ export async function processPassageWithOptionalLlm(params: {
   });
 
   const targetWords = basePassage.questions
-    .slice(0, 4)
+    .slice(0, 3)
     .map((q) => q.options[q.correctIndex]);
   const distractorPrompt = buildDistractorPrompt(targetWords);
+  const distractorMessages = buildDistractorChatMessages(targetWords);
 
   // Tier A: In-Browser WebGPU (@mlc-ai/web-llm) — Ultra-lightweight distractor word generation
   if (params.provider === 'webllm') {
@@ -973,9 +1003,9 @@ export async function processPassageWithOptionalLlm(params: {
       );
 
       const reply = await engine.chat.completions.create({
-        messages: [{ role: 'user', content: distractorPrompt }],
+        messages: distractorMessages,
         temperature: 0.3,
-        max_tokens: 64,
+        max_tokens: 72,
         ...(isQwen3Model(modelId)
           ? { extra_body: { enable_thinking: false } }
           : {}),
