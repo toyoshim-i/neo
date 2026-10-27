@@ -161,7 +161,7 @@ export function QuizScreen({
                 className="cyber-btn w-full py-3 bg-[#FFE600] text-[#0D0618] font-bold text-sm flex items-center justify-center gap-2"
               >
                 <span>
-                  {quizIndex < selectedPassage.questions.length - 1
+                  {quizIndex < quizList.length - 1
                     ? 'NEXT QUESTION [ENTER]'
                     : 'VIEW SESSION RESULT [ENTER]'}
                 </span>

@@ -38,10 +38,25 @@ export const MODE_INFO: Record<
   },
 };
 
+/**
+ * Randomly samples `sampleCount` (default 3) questions from a passage's question pool
+ * using Fisher-Yates shuffle, and randomizes the 4 answer choices for each sampled question.
+ */
 export function shuffleQuizQuestions(
-  questions: QuizQuestion[]
+  questions: QuizQuestion[],
+  sampleCount = 3
 ): QuizQuestion[] {
-  return questions.map((q) => {
+  const pool = [...questions];
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const tmp = pool[i];
+    pool[i] = pool[j];
+    pool[j] = tmp;
+  }
+
+  const sampled = pool.slice(0, Math.max(1, Math.min(sampleCount, pool.length)));
+
+  return sampled.map((q) => {
     const pairs = q.options.map((text, idx) => ({
       text,
       isCorrect: idx === q.correctIndex,

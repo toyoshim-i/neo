@@ -878,9 +878,9 @@ export async function processPassageWithOptionalLlm(params: {
     sourceType: params.sourceType,
   });
 
-  const targetWords = basePassage.questions.map(
-    (q) => q.options[q.correctIndex]
-  );
+  const targetWords = basePassage.questions
+    .slice(0, 4)
+    .map((q) => q.options[q.correctIndex]);
   const distractorPrompt = buildDistractorPrompt(targetWords);
 
   // Tier A: In-Browser WebGPU (@mlc-ai/web-llm) — Ultra-lightweight distractor word generation

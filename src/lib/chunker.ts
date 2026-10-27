@@ -94,36 +94,46 @@ export function splitIntoSemanticChunks(rawText: string): {
 }
 
 /**
- * Heuristic Cloze / Context Comprehension Question Generator (Fallback when Local LLM is offline)
+ * Heuristic Cloze / Context Comprehension Question Generator (Fallback & Question Pool Expander)
  */
 export function generateHeuristicQuestions(
   title: string,
-  rawText: string
+  rawText: string,
+  maxQuestions = 8
 ): QuizQuestion[] {
   const sentences = rawText
     .split(/(?<=[.!?])\s+/)
     .map((s) => s.trim())
-    .filter((s) => s.split(/\s+/).length >= 7);
+    .filter((s) => s.split(/\s+/).length >= 6);
 
-  // Extract long content words (>= 7 letters, alphabetic)
+  const stopwordSet = new Set([
+    'however',
+    'because',
+    'through',
+    'between',
+    'without',
+    'another',
+    'whether',
+    'therefore',
+    'furthermore',
+    'consequently',
+    'meanwhile',
+    'nevertheless',
+    'instead',
+    'whereas',
+    'although',
+    'already',
+    'several',
+    'towards',
+    'against',
+  ]);
+
+  // Extract content words (>= 6 letters, alphabetic)
   const contentWords = Array.from(
     new Set(
-      (rawText.match(/\b[A-Za-z]{7,}\b/g) || []).map((w) => w.toLowerCase())
+      (rawText.match(/\b[A-Za-z]{6,}\b/g) || []).map((w) => w.toLowerCase())
     )
-  ).filter(
-    (w) =>
-      ![
-        'however',
-        'because',
-        'through',
-        'between',
-        'without',
-        'another',
-        'whether',
-        'therefore',
-        'furthermore',
-      ].includes(w)
-  );
+  ).filter((w) => !stopwordSet.has(w));
 
   const fallbackPool = [
     'architecture',
@@ -134,55 +144,101 @@ export function generateHeuristicQuestions(
     'optimization',
     'integration',
     'plasticity',
+    'equilibrium',
+    'perception',
+    'modulation',
+    'trajectory',
   ];
 
   const questions: QuizQuestion[] = [];
-  const targetSentences = sentences.slice(0, 3);
+  const usedTargets = new Set<string>();
 
-  targetSentences.forEach((sentence, idx) => {
-    const matchWord =
-      sentence
-        .match(/\b[A-Za-z]{7,}\b/g)
-        ?.find((w) => contentWords.includes(w.toLowerCase())) ||
-      sentence.split(/\s+/).find((w) => w.length >= 5)?.replace(/[^A-Za-z]/g, '') ||
-      'concept';
+  // Pass 1: One distinct Cloze target per sentence across all sentences
+  // Pass 2: Second distinct Cloze target from multi-clause sentences if pool < maxQuestions
+  for (let pass = 0; pass < 2 && questions.length < maxQuestions; pass++) {
+    for (let sIdx = 0; sIdx < sentences.length && questions.length < maxQuestions; sIdx++) {
+      const sentence = sentences[sIdx];
+      const candidates = (sentence.match(/\b[A-Za-z]{6,}\b/g) || []).filter(
+        (w) =>
+          contentWords.includes(w.toLowerCase()) &&
+          !usedTargets.has(w.toLowerCase())
+      );
 
-    const cleanTarget = matchWord.replace(/[^A-Za-z]/g, '');
-    const blankedSentence = sentence.replace(
-      new RegExp(`\\b${cleanTarget}\\b`),
-      '[ ______ ]'
-    );
+      const chosenRaw =
+        candidates[0] ||
+        (pass === 0
+          ? sentence
+              .split(/\s+/)
+              .map((w) => w.replace(/[^A-Za-z]/g, ''))
+              .find(
+                (w) =>
+                  w.length >= 5 &&
+                  !stopwordSet.has(w.toLowerCase()) &&
+                  !usedTargets.has(w.toLowerCase())
+              )
+          : undefined);
 
-    const distractors = [...contentWords, ...fallbackPool]
-      .filter((w) => w.toLowerCase() !== cleanTarget.toLowerCase())
-      .slice(idx * 3, idx * 3 + 3);
+      if (!chosenRaw) continue;
 
-    while (distractors.length < 3) {
-      distractors.push(fallbackPool[distractors.length]);
+      const cleanTarget = chosenRaw.replace(/[^A-Za-z]/g, '');
+      const lowerTarget = cleanTarget.toLowerCase();
+      usedTargets.add(lowerTarget);
+
+      const blankedSentence = sentence.replace(
+        new RegExp(`\\b${cleanTarget}\\b`),
+        '[ ______ ]'
+      );
+
+      const isCapitalized = /^[A-Z]/.test(cleanTarget);
+      const formatCase = (word: string) =>
+        isCapitalized
+          ? word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+          : word.toLowerCase();
+
+      const candidateDistractors = [...contentWords, ...fallbackPool].filter(
+        (w) => w.toLowerCase() !== lowerTarget
+      );
+
+      const qIdx = questions.length;
+      const distractors: string[] = [];
+      for (let k = 0; k < candidateDistractors.length && distractors.length < 3; k++) {
+        const pick =
+          candidateDistractors[(qIdx * 3 + k) % candidateDistractors.length];
+        const formatted = formatCase(pick);
+        if (
+          formatted.toLowerCase() !== lowerTarget &&
+          !distractors.some((d) => d.toLowerCase() === formatted.toLowerCase())
+        ) {
+          distractors.push(formatted);
+        }
+      }
+
+      while (distractors.length < 3) {
+        distractors.push(formatCase(fallbackPool[distractors.length]));
+      }
+
+      const rawOptions = [cleanTarget, ...distractors.slice(0, 3)];
+      const correctPos = qIdx % 4;
+      const ordered: [string, string, string, string] = [
+        rawOptions[0],
+        rawOptions[1],
+        rawOptions[2],
+        rawOptions[3],
+      ];
+      const temp = ordered[correctPos];
+      ordered[correctPos] = cleanTarget;
+      ordered[0] = temp;
+
+      questions.push({
+        id: `q-auto-${sIdx}-${pass}-${qIdx}`,
+        code: `CLOZE-0${qIdx + 1}`,
+        question: `Which key term accurately completes this statement from "${title}": "${blankedSentence}"`,
+        options: ordered,
+        correctIndex: correctPos,
+        explanation: `In the original passage context: "${sentence}"`,
+      });
     }
-
-    const rawOptions = [cleanTarget, ...distractors.slice(0, 3)];
-    const correctPos = idx % 4;
-    // Rotate so correct answer lands at correctPos
-    const ordered: [string, string, string, string] = [
-      rawOptions[0],
-      rawOptions[1],
-      rawOptions[2],
-      rawOptions[3],
-    ];
-    const temp = ordered[correctPos];
-    ordered[correctPos] = cleanTarget;
-    ordered[0] = temp;
-
-    questions.push({
-      id: `q-auto-${Date.now()}-${idx}`,
-      code: `SYNAPSE-0${idx + 1}`,
-      question: `Which key term accurately completes this statement from "${title}": "${blankedSentence}"`,
-      options: ordered,
-      correctIndex: correctPos,
-      explanation: `In the original passage context: "${sentence}"`,
-    });
-  });
+  }
 
   while (questions.length < 3) {
     const extraWord =

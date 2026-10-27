@@ -1019,7 +1019,9 @@ export function App() {
       : screen === 'reading'
       ? `TRAINING // ${MODE_INFO[selectedMode].label}`
       : screen === 'quiz'
-      ? `NEURAL VERIFICATION (${quizIndex + 1}/${selectedPassage.questions.length})`
+      ? `NEURAL VERIFICATION (${quizIndex + 1}/${
+          activeQuizQuestions.length || 3
+        })`
       : 'SESSION REPORT';
 
   return (

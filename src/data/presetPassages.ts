@@ -1,3 +1,4 @@
+import { generateHeuristicQuestions } from '../lib/chunker';
 import { TrainingPassage } from '../types/schema';
 
 interface RawPresetSeed {
@@ -23,6 +24,15 @@ function buildPassage(seed: RawPresetSeed, index: number): TrainingPassage {
     }
   });
 
+  // Combine the 3 curated conceptual questions with 6 contextual Cloze questions
+  // so every passage has a diverse 9-question pool sampled randomly per session.
+  const clozePool = generateHeuristicQuestions(seed.title, rawText, 6).map(
+    (q, qIdx) => ({
+      ...q,
+      id: `${seed.id}-cloze-${qIdx + 1}`,
+    })
+  );
+
   return {
     id: seed.id,
     sourceType: 'preset',
@@ -33,7 +43,7 @@ function buildPassage(seed: RawPresetSeed, index: number): TrainingPassage {
     rawText,
     chunks: seed.chunks,
     discourseMarkerIndices,
-    questions: seed.questions,
+    questions: [...seed.questions, ...clozePool],
     createdAt: 1760000000000 + index * 3600000,
   };
 }
