@@ -215,32 +215,35 @@ export function App() {
     }
   }, []);
 
+  // Initial boot: load IndexedDB and auto-select a cached WebLLM model once on mount
   useEffect(() => {
     reloadFromDb();
     checkCachedWebLlmModels().then((cacheMap) => {
       setCachedModels(cacheMap);
-      if (!cacheMap[selectedWebLlmModel]) {
-        const cachedEntry = WEBLLM_MODEL_OPTIONS.find((m) => cacheMap[m.id]);
-        if (cachedEntry) {
-          setSelectedWebLlmModel(cachedEntry.id);
-          saveWebLlmModelSelection(cachedEntry.id);
-          setWebLlmStatus(
-            isWebLlmReady(cachedEntry.id)
-              ? 'READY IN VRAM'
-              : 'CACHED ON DISK (READY TO LOAD)'
-          );
-          return;
+      setSelectedWebLlmModel((initialModel) => {
+        if (!cacheMap[initialModel]) {
+          const cachedEntry = WEBLLM_MODEL_OPTIONS.find((m) => cacheMap[m.id]);
+          if (cachedEntry) {
+            saveWebLlmModelSelection(cachedEntry.id);
+            setWebLlmStatus(
+              isWebLlmReady(cachedEntry.id)
+                ? 'READY IN VRAM'
+                : 'CACHED ON DISK (READY TO LOAD)'
+            );
+            return cachedEntry.id;
+          }
         }
-      }
-      setWebLlmStatus(
-        isWebLlmReady(selectedWebLlmModel)
-          ? 'READY IN VRAM'
-          : cacheMap[selectedWebLlmModel]
-          ? 'CACHED ON DISK (READY TO LOAD)'
-          : 'NOT DOWNLOADED'
-      );
+        setWebLlmStatus(
+          isWebLlmReady(initialModel)
+            ? 'READY IN VRAM'
+            : cacheMap[initialModel]
+            ? 'CACHED ON DISK (READY TO LOAD)'
+            : 'NOT DOWNLOADED'
+        );
+        return initialModel;
+      });
     });
-  }, [reloadFromDb, selectedWebLlmModel]);
+  }, [reloadFromDb]);
 
   // Subscribe to WebLLM download progress globally (persists even when Settings modal is closed)
   useEffect(() => {
