@@ -186,28 +186,20 @@ ${numbered}`;
 
 function buildDistractorChatMessages(
   targetWords: string[]
-): Array<{ role: 'system' | 'user' | 'assistant'; content: string }> {
+): Array<{ role: 'system' | 'user'; content: string }> {
   const numbered = targetWords
     .slice(0, 3)
-    .map((w, idx) => `${idx + 1}. ${sanitizeTargetWord(w)}:`)
+    .map((w, idx) => `${idx + 1}. ${sanitizeTargetWord(w)} ->`)
     .join('\n');
   return [
     {
       role: 'system',
       content:
-        'You generate 3 comma-separated English distractor words (synonyms or same category) for each numbered word. Output ONLY the numbered lines.',
+        'Write 3 related English words (synonyms or same category, separated by commas) for each numbered word. Output ONLY the numbered lines.',
     },
     {
       role: 'user',
-      content: '1. velocity:\n2. painting:',
-    },
-    {
-      role: 'assistant',
-      content: '1. speed, motion, tempo\n2. sculpture, drawing, fresco',
-    },
-    {
-      role: 'user',
-      content: numbered,
+      content: `Example:\nvelocity -> speed, motion, tempo\npainting -> sculpture, drawing, fresco\n\n${numbered}`,
     },
   ];
 }
@@ -363,13 +355,12 @@ function applyLlmDistractorsToQuestions(
 }
 
 // Persist engine singleton on globalThis so Vite HMR updates never drop VRAM state
-const ENGINE_CONFIG_VERSION = 7;
+const ENGINE_CONFIG_VERSION = 8;
 
 type ProgressListener = (text: string, progress: number) => void;
 
 interface GlobalWebLlmState {
   engine: MLCEngineInterface | null;
-  worker: Worker | null;
   loadedModelId: string | null;
   loadingModelId: string | null;
   loadingPromise: Promise<MLCEngineInterface> | null;
@@ -381,7 +372,7 @@ interface GlobalWebLlmState {
 
 const globalState: GlobalWebLlmState = (() => {
   const g = globalThis as unknown as {
-    __WETWARE_WEBLLM__?: GlobalWebLlmState;
+    __WETWARE_WEBLLM__?: GlobalWebLlmState & { worker?: Worker | null };
   };
   if (
     !g.__WETWARE_WEBLLM__ ||
@@ -396,7 +387,6 @@ const globalState: GlobalWebLlmState = (() => {
     }
     g.__WETWARE_WEBLLM__ = {
       engine: null,
-      worker: null,
       loadedModelId: null,
       loadingModelId: null,
       loadingPromise: null,
@@ -444,52 +434,6 @@ export function isQwen3Model(modelId?: string | null): boolean {
 }
 
 /**
- * Releases unused temporary prefill/decode workspace GPUBuffers cached inside TVM's PooledAllocator
- * (`vm.builtin.memory_manager.clear`) and resets single-turn KV cache state after each request.
- */
-function flushMainThreadMemoryPools(engine: MLCEngineInterface): void {
-  try {
-    const engineAny = engine as unknown as {
-      loadedModelIdToPipeline?: Map<
-        string,
-        {
-          resetChat?: (keepStats?: boolean) => void;
-          tvm?: {
-            beginScope: () => void;
-            endScope: () => void;
-            getGlobalFunc: (name: string) => () => void;
-          };
-        }
-      >;
-    };
-    const pipelines = engineAny?.loadedModelIdToPipeline;
-    if (!pipelines) return;
-    for (const pipeline of pipelines.values()) {
-      try {
-        pipeline.resetChat?.(true);
-      } catch {
-        // Ignore resetChat error
-      }
-      if (pipeline?.tvm) {
-        pipeline.tvm.beginScope();
-        try {
-          const clearPool = pipeline.tvm.getGlobalFunc(
-            'vm.builtin.memory_manager.clear'
-          );
-          clearPool();
-        } catch {
-          // Ignore if clear func unavailable
-        } finally {
-          pipeline.tvm.endScope();
-        }
-      }
-    }
-  } catch {
-    // Ignore cleanup errors
-  }
-}
-
-/**
  * Checks which WebGPU models are already stored in the browser's persistent Cache Storage.
  * Note: Cached models reside on disk storage and consume 0 bytes of RAM/VRAM until loaded.
  */
@@ -524,12 +468,11 @@ export async function checkCachedWebLlmModels(): Promise<
 }
 
 /**
- * Explicitly unloads the active WebGPU model from VRAM, terminates the Web Worker
- * (so 100% of its WebAssembly linear memory and JS heap are synchronously returned to the OS),
+ * Explicitly unloads the active WebGPU model from VRAM (`GPUDevice.destroy()`)
  * and yields across macrotasks so the mobile GPU driver finishes reclaiming unified memory.
  */
 export async function unloadWebLlmEngine(): Promise<void> {
-  const hadActiveResources = Boolean(globalState.engine || globalState.worker);
+  const hadActiveEngine = Boolean(globalState.engine);
 
   if (globalState.engine) {
     try {
@@ -540,20 +483,11 @@ export async function unloadWebLlmEngine(): Promise<void> {
     globalState.engine = null;
   }
 
-  if (globalState.worker) {
-    try {
-      globalState.worker.terminate();
-    } catch {
-      // Ignore worker termination error
-    }
-    globalState.worker = null;
-  }
-
   globalState.loadedModelId = null;
 
-  if (hadActiveResources) {
-    // Allow asynchronous GPUDevice.destroy() IPC and OS thread teardown to complete
-    await new Promise((resolve) => setTimeout(resolve, 350));
+  if (hadActiveEngine) {
+    // Allow asynchronous GPUDevice.destroy() IPC to complete
+    await new Promise((resolve) => setTimeout(resolve, 400));
   }
 }
 
@@ -596,10 +530,7 @@ export async function purgeWebLlmDiskCache(): Promise<void> {
 }
 
 /**
- * Initializes (or reuses) the in-browser WebGPU MLC Engine inside a dedicated Web Worker
- * with a compact 256-token KV cache window (`context_window_size: 256`).
- * Running inside a Worker allows `worker.terminate()` on model switch to deterministically
- * free 100% of WASM linear memory and JS heap alongside `GPUDevice.destroy()`.
+ * Initializes (or reuses) the in-browser WebGPU MLC Engine with a compact 256-token KV cache window.
  */
 export async function initWebLlmEngine(
   modelId: string = DEFAULT_WEBLLM_MODEL,
@@ -611,17 +542,15 @@ export async function initWebLlmEngine(
     );
   }
 
-  const {
-    CreateMLCEngine,
-    CreateWebWorkerMLCEngine,
-    prebuiltAppConfig,
-  } = await import('@mlc-ai/web-llm');
+  const { CreateMLCEngine, prebuiltAppConfig } = await import(
+    '@mlc-ai/web-llm'
+  );
   const matchedRecord = prebuiltAppConfig.model_list.find(
     (m) => m.model_id.toLowerCase() === modelId.toLowerCase()
   );
   const resolvedModelId = matchedRecord ? matchedRecord.model_id : modelId;
 
-  // Use a compact 256-token KV cache window (our translation & distractor prompts use <140 tokens total).
+  // Use a compact 256-token KV cache window (our translation & distractor prompts use <100 tokens total).
   // This cuts FP32 KV cache allocation by 16x compared to the default 4096 window (~1 GB saved on mobile!).
   const chatOpts = {
     context_window_size: 256,
@@ -675,61 +604,23 @@ export async function initWebLlmEngine(
         }
       }
 
-      // Explicitly unload previous GPU buffers AND terminate the previous Worker isolate
-      // so WebGPU unified memory and WASM linear heaps never overlap when switching models
-      if (globalState.engine || globalState.worker) {
+      // Explicitly unload previous GPU buffers before loading a new model
+      if (globalState.engine) {
         notifyProgress({
-          text: 'Releasing previous model VRAM & WASM heap...',
+          text: 'Releasing previous model VRAM...',
           progress: 0,
         });
         await unloadWebLlmEngine();
       }
 
-      let engine: MLCEngineInterface;
-      if (typeof Worker !== 'undefined') {
-        try {
-          const worker = new Worker(
-            new URL('./webllmWorker.ts', import.meta.url),
-            { type: 'module' }
-          );
-          globalState.worker = worker;
-          engine = await CreateWebWorkerMLCEngine(
-            worker,
-            resolvedModelId,
-            {
-              appConfig: prebuiltAppConfig,
-              initProgressCallback: notifyProgress,
-            },
-            chatOpts
-          );
-        } catch {
-          if (globalState.worker) {
-            try {
-              globalState.worker.terminate();
-            } catch {
-              // Ignore worker termination error
-            }
-            globalState.worker = null;
-          }
-          engine = await CreateMLCEngine(
-            resolvedModelId,
-            {
-              appConfig: prebuiltAppConfig,
-              initProgressCallback: notifyProgress,
-            },
-            chatOpts
-          );
-        }
-      } else {
-        engine = await CreateMLCEngine(
-          resolvedModelId,
-          {
-            appConfig: prebuiltAppConfig,
-            initProgressCallback: notifyProgress,
-          },
-          chatOpts
-        );
-      }
+      const engine = await CreateMLCEngine(
+        resolvedModelId,
+        {
+          appConfig: prebuiltAppConfig,
+          initProgressCallback: notifyProgress,
+        },
+        chatOpts
+      );
 
       globalState.engine = engine;
       globalState.loadedModelId = resolvedModelId;
@@ -1140,7 +1031,6 @@ export async function processPassageWithOptionalLlm(params: {
           ? { extra_body: { enable_thinking: false } }
           : {}),
       });
-      flushMainThreadMemoryPools(engine);
 
       const content = reply.choices?.[0]?.message?.content || '';
       const { updatedQuestions, appliedCount } = applyLlmDistractorsToQuestions(
@@ -1599,7 +1489,10 @@ function extractCleanTranslationLine(raw: string): string {
       .split('\n')
       .map((line) => line.trim())
       .find((line) => line.length > 0) || '';
-  return firstNonEmptyLine
+  const afterArrow = firstNonEmptyLine.includes('→') || firstNonEmptyLine.includes('->')
+    ? (firstNonEmptyLine.split(/→|->/).pop() || '').trim()
+    : firstNonEmptyLine;
+  return afterArrow
     .replace(/^(?:日本語訳|日本語|意味|訳|Translation|Meaning)\s*[:：]\s*/i, '')
     .replace(/^["'「『`]+|["'」』`]+$/g, '')
     .trim();
@@ -1632,64 +1525,48 @@ function isValidTargetLanguageTranslation(
 function buildTranslationChatMessages(
   cleanText: string,
   targetLang: TranslationLangCode
-): Array<{ role: 'system' | 'user' | 'assistant'; content: string }> {
+): Array<{ role: 'system' | 'user'; content: string }> {
   const localizedTemplates: Record<
     TranslationLangCode,
     {
       system: string;
-      formatUser: (term: string) => string;
-      ex1: string;
-      ex2: string;
+      user: string;
     }
   > = {
     ja: {
       system:
-        'あなたは英和辞典です。与えられた英語の簡潔な日本語訳のみを出力してください。英単語や類義語、説明文は絶対に出力しないでください。',
-      formatUser: (term) => `「${term}」の日本語訳:`,
-      ex1: '急速な、速い',
-      ex2: '重要な手がかりを抽出する',
+        'あなたは英和辞典です。与えられた英語の簡潔な日本語訳のみを出力してください。英単語や類義語は出力しないでください。',
+      user: `例:\n"rapid" → 急速な、速い\n"extract vital cues" → 重要な手がかりを抽出する\n"${cleanText}" →`,
     },
     'zh-CN': {
       system:
-        '你是一本英汉词典。请只输出所给英文的简短中文翻译，绝对不要输出英文单词、同义词或解释。',
-      formatUser: (term) => `“${term}”的中文翻译:`,
-      ex1: '快速的、迅速的',
-      ex2: '提取重要线索',
+        '你是一本英汉词典。请只输出所给英文的简短中文翻译，不要输出英文或解释。',
+      user: `示例:\n"rapid" → 快速的、迅速的\n"extract vital cues" → 提取重要线索\n"${cleanText}" →`,
     },
     'zh-TW': {
       system:
-        '你是一本英漢詞典。請只輸出所給英文的簡短繁體中文翻譯，絕對不要輸出英文單詞、同義詞或解釋。',
-      formatUser: (term) => `「${term}」的中文翻譯:`,
-      ex1: '快速的、迅速的',
-      ex2: '提取重要線索',
+        '你是一本英漢詞典。請只輸出所給英文的簡短繁體中文翻譯，不要輸出英文或解釋。',
+      user: `示例:\n"rapid" → 快速的、迅速的\n"extract vital cues" → 提取重要線索\n"${cleanText}" →`,
     },
     ko: {
       system:
-        '당신은 영한사전입니다. 주어진 영어의 간결한 한국어 뜻만 출력하세요. 영단어나 유의어, 설명은 절대 출력하지 마세요.',
-      formatUser: (term) => `'${term}'의 한국어 뜻:`,
-      ex1: '빠른, 신속한',
-      ex2: '중요한 단서를 추출하다',
+        '당신은 영한사전입니다. 주어진 영어의 간결한 한국어 뜻만 출력하세요.',
+      user: `예시:\n"rapid" → 빠른, 신속한\n"extract vital cues" → 중요한 단서를 추출하다\n"${cleanText}" →`,
     },
     es: {
       system:
-        'Eres un diccionario inglés-español. Escribe SOLO la traducción breve al español. Nunca escribas palabras en inglés ni explicaciones.',
-      formatUser: (term) => `Traducción al español de "${term}":`,
-      ex1: 'rápido, veloz',
-      ex2: 'extraer pistas vitales',
+        'Eres un diccionario inglés-español. Escribe SOLO la traducción breve al español.',
+      user: `Ejemplo:\n"rapid" → rápido, veloz\n"extract vital cues" → extraer pistas vitales\n"${cleanText}" →`,
     },
     fr: {
       system:
-        'Vous êtes un dictionnaire anglais-français. Donnez UNIQUEMENT la traduction courte en français. Ne donnez jamais de mots anglais ni d’explications.',
-      formatUser: (term) => `Traduction en français de « ${term} » :`,
-      ex1: 'rapide, véloce',
-      ex2: 'extraire des indices vitaux',
+        'Vous êtes un dictionnaire anglais-français. Donnez UNIQUEMENT la traduction courte en français.',
+      user: `Exemple:\n"rapid" → rapide, véloce\n"extract vital cues" → extraire des indices vitaux\n"${cleanText}" →`,
     },
     de: {
       system:
-        'Du bist ein Englisch-Deutsch-Wörterbuch. Gib NUR die kurze deutsche Übersetzung aus. Gib niemals englische Wörter oder Erklärungen aus.',
-      formatUser: (term) => `Deutsche Übersetzung von „${term}“:`,
-      ex1: 'schnell, rasch',
-      ex2: 'wichtige Hinweise extrahieren',
+        'Du bist ein Englisch-Deutsch-Wörterbuch. Gib NUR die kurze deutsche Übersetzung aus.',
+      user: `Beispiel:\n"rapid" → schnell, rasch\n"extract vital cues" → wichtige Hinweise extrahieren\n"${cleanText}" →`,
     },
   };
 
@@ -1702,23 +1579,7 @@ function buildTranslationChatMessages(
     },
     {
       role: 'user',
-      content: tpl.formatUser('rapid'),
-    },
-    {
-      role: 'assistant',
-      content: tpl.ex1,
-    },
-    {
-      role: 'user',
-      content: tpl.formatUser('extract vital cues'),
-    },
-    {
-      role: 'assistant',
-      content: tpl.ex2,
-    },
-    {
-      role: 'user',
-      content: tpl.formatUser(cleanText),
+      content: tpl.user,
     },
   ];
 }
@@ -1808,39 +1669,13 @@ export async function translateSelection(params: {
       const reply = await engine.chat.completions.create({
         messages: chatMessages,
         temperature: 0.1,
-        max_tokens: 36,
+        max_tokens: 32,
         ...(isQwen3Model(modelId)
           ? { extra_body: { enable_thinking: false } }
           : {}),
       });
-      flushMainThreadMemoryPools(engine);
       const rawContent = reply.choices?.[0]?.message?.content || '';
-      let out = extractCleanTranslationLine(rawContent);
-
-      // If a small model still returned English instead of the target script, retry once with explicit native suffix
-      if (!isValidTargetLanguageTranslation(out, cleanText, params.targetLang)) {
-        const retryReply = await engine.chat.completions.create({
-          messages: [
-            ...chatMessages.slice(0, -1),
-            {
-              role: 'user',
-              content:
-                params.targetLang === 'ja'
-                  ? `英語「${cleanText}」を日本語に翻訳してください（日本語のみ出力）:`
-                  : `Translate "${cleanText}" into ${langInfo.englishName} (${langInfo.englishName} only):`,
-            },
-          ],
-          temperature: 0.0,
-          max_tokens: 36,
-          ...(isQwen3Model(modelId)
-            ? { extra_body: { enable_thinking: false } }
-            : {}),
-        });
-        flushMainThreadMemoryPools(engine);
-        out = extractCleanTranslationLine(
-          retryReply.choices?.[0]?.message?.content || ''
-        );
-      }
+      const out = extractCleanTranslationLine(rawContent);
 
       if (isValidTargetLanguageTranslation(out, cleanText, params.targetLang)) {
         const hit = { translation: out, source: 'webllm' as const };
