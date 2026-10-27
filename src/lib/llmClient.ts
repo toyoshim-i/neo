@@ -1424,6 +1424,23 @@ async function translateViaCloudServer(
   return translated;
 }
 
+function extractCleanTranslationLine(raw: string): string {
+  const withoutTags = raw
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .replace(/<think>[\s\S]*$/gi, '')
+    .replace(
+      /<\|thought\|>[\s\S]*?(?:<\|thought\|>|<\/thought>|<thought\|>|$)/gi,
+      ''
+    )
+    .trim();
+  const firstNonEmptyLine =
+    withoutTags
+      .split('\n')
+      .map((line) => line.trim())
+      .find((line) => line.length > 0) || '';
+  return firstNonEmptyLine.replace(/^["'`]+|["'`]+$/g, '').trim();
+}
+
 /**
  * Translates a selected word or phrase into the user's configured target language.
  * - Uses Chrome Built-in AI (`Translator` API or Gemini Nano `LanguageModel`), in-browser WebLLM, or Ollama.
@@ -1470,10 +1487,7 @@ export async function translateSelection(params: {
     }
     try {
       const raw = await promptChromeBuiltInAi(prompt, systemInstruction);
-      const out = raw
-        .split('\n')[0]
-        .replace(/^["'`]+|["'`]+$/g, '')
-        .trim();
+      const out = extractCleanTranslationLine(raw);
       if (out) {
         return { translation: out, source: 'chrome_ai' };
       }
@@ -1482,10 +1496,16 @@ export async function translateSelection(params: {
     }
   }
 
-  // 2. If WebLLM is selected AND already loaded in VRAM, run on-device translation
-  if (params.provider === 'webllm' && isWebLlmReady(params.webLlmModel)) {
+  let webLlmDiagError: string | null = null;
+
+  // 2. If WebLLM is selected (or already loaded in VRAM), run on-device translation
+  if (
+    (params.provider === 'webllm' && isWebLlmReady(params.webLlmModel)) ||
+    isWebLlmReady()
+  ) {
     try {
-      const modelId = params.webLlmModel || DEFAULT_WEBLLM_MODEL;
+      const modelId =
+        getLoadedWebLlmModelId() || params.webLlmModel || DEFAULT_WEBLLM_MODEL;
       const engine = await initWebLlmEngine(modelId);
       const reply = await engine.chat.completions.create({
         messages: [
@@ -1493,22 +1513,20 @@ export async function translateSelection(params: {
           { role: 'user', content: prompt },
         ],
         temperature: 0.1,
-        max_tokens: 32,
+        max_tokens: 40,
         ...(isQwen3Model(modelId)
           ? { extra_body: { enable_thinking: false } }
           : {}),
       });
-      const out = (reply.choices?.[0]?.message?.content || '')
-        .replace(/<think>[\s\S]*?<\/think>/gi, '')
-        .replace(/<\|thought\|>[\s\S]*?(?:<\|thought\|>|<\/thought>|<thought\|>)/gi, '')
-        .split('\n')[0]
-        .replace(/^["'`]+|["'`]+$/g, '')
-        .trim();
+      const rawContent = reply.choices?.[0]?.message?.content || '';
+      const out = extractCleanTranslationLine(rawContent);
       if (out) {
         return { translation: out, source: 'webllm' };
       }
-    } catch {
-      // Fall through if permitted
+      webLlmDiagError = 'WebGPU model returned an empty response.';
+    } catch (err) {
+      webLlmDiagError =
+        err instanceof Error ? err.message : 'WebGPU translation failed';
     }
   }
 
@@ -1545,7 +1563,7 @@ export async function translateSelection(params: {
         const raw: string = isOpenAiCompat
           ? json.choices?.[0]?.message?.content || ''
           : json.response || '';
-        const out = raw.split('\n')[0].replace(/^["'`]+|["'`]+$/g, '').trim();
+        const out = extractCleanTranslationLine(raw);
         if (out) {
           return { translation: out, source: 'ollama' };
         }
@@ -1567,6 +1585,9 @@ export async function translateSelection(params: {
 
   // 5. External Translate Server API (Google Translate Server + MyMemory; Opt-In Default OFF)
   if (!params.allowCloudApi) {
+    if (webLlmDiagError) {
+      throw new Error(`WebGPU LLM error: ${webLlmDiagError}`);
+    }
     throw new Error(
       'Local AI offline. Enable Chrome Built-in AI, load a WebGPU LLM, or turn ON "External Translate Server API" in CONFIG.'
     );
