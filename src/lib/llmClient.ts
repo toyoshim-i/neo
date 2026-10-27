@@ -28,7 +28,6 @@ export function saveLlmProviderSelection(provider: LlmProviderType): void {
 }
 
 export type WebLlmModelId =
-  | 'gemma3-1b-it-q4f16_1-MLC'
   | 'gemma-2-2b-it-q4f32_1-MLC-1k'
   | 'gemma-4-E2B-it-q4f32_1-MLC';
 
@@ -38,12 +37,6 @@ export const WEBLLM_MODEL_OPTIONS: Array<{
   vram: string;
   desc: string;
 }> = [
-  {
-    id: 'gemma3-1b-it-q4f16_1-MLC',
-    label: 'GEMMA 3 1B',
-    vram: '0.7 GB',
-    desc: 'Ultra-lightweight (Sliding Window 512)',
-  },
   {
     id: 'gemma-2-2b-it-q4f32_1-MLC-1k',
     label: 'GEMMA 2 2B (F32)',
@@ -72,7 +65,7 @@ export function getSavedWebLlmModel(): WebLlmModelId {
       return saved as WebLlmModelId;
     }
   }
-  return 'gemma3-1b-it-q4f16_1-MLC';
+  return 'gemma-2-2b-it-q4f32_1-MLC-1k';
 }
 
 export function saveWebLlmModelSelection(modelId: WebLlmModelId): void {
@@ -392,7 +385,6 @@ export async function checkCachedWebLlmModels(): Promise<
   Record<WebLlmModelId, boolean>
 > {
   const result: Record<WebLlmModelId, boolean> = {
-    'gemma3-1b-it-q4f16_1-MLC': false,
     'gemma-2-2b-it-q4f32_1-MLC-1k': false,
     'gemma-4-E2B-it-q4f32_1-MLC': false,
   };

@@ -381,8 +381,8 @@ export function SystemSettingsModal({
                     </span>
                   </div>
 
-                  {/* 3-Model Selector (Gemma 2 2B / Gemma 4 E2B / Gemma 3 1B) */}
-                  <div className="grid grid-cols-3 gap-1.5">
+                  {/* 2-Model Selector (Gemma 2 2B / Gemma 4 E2B) */}
+                  <div className="grid grid-cols-2 gap-1.5">
                     {WEBLLM_MODEL_OPTIONS.map((m) => {
                       const active = selectedWebLlmModel === m.id;
                       const isCached = cachedModels[m.id];
