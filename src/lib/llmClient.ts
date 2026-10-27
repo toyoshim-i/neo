@@ -444,6 +444,52 @@ export function isQwen3Model(modelId?: string | null): boolean {
 }
 
 /**
+ * Releases unused temporary prefill/decode workspace GPUBuffers cached inside TVM's PooledAllocator
+ * (`vm.builtin.memory_manager.clear`) and resets single-turn KV cache state after each request.
+ */
+function flushMainThreadMemoryPools(engine: MLCEngineInterface): void {
+  try {
+    const engineAny = engine as unknown as {
+      loadedModelIdToPipeline?: Map<
+        string,
+        {
+          resetChat?: (keepStats?: boolean) => void;
+          tvm?: {
+            beginScope: () => void;
+            endScope: () => void;
+            getGlobalFunc: (name: string) => () => void;
+          };
+        }
+      >;
+    };
+    const pipelines = engineAny?.loadedModelIdToPipeline;
+    if (!pipelines) return;
+    for (const pipeline of pipelines.values()) {
+      try {
+        pipeline.resetChat?.(true);
+      } catch {
+        // Ignore resetChat error
+      }
+      if (pipeline?.tvm) {
+        pipeline.tvm.beginScope();
+        try {
+          const clearPool = pipeline.tvm.getGlobalFunc(
+            'vm.builtin.memory_manager.clear'
+          );
+          clearPool();
+        } catch {
+          // Ignore if clear func unavailable
+        } finally {
+          pipeline.tvm.endScope();
+        }
+      }
+    }
+  } catch {
+    // Ignore cleanup errors
+  }
+}
+
+/**
  * Checks which WebGPU models are already stored in the browser's persistent Cache Storage.
  * Note: Cached models reside on disk storage and consume 0 bytes of RAM/VRAM until loaded.
  */
@@ -1094,6 +1140,7 @@ export async function processPassageWithOptionalLlm(params: {
           ? { extra_body: { enable_thinking: false } }
           : {}),
       });
+      flushMainThreadMemoryPools(engine);
 
       const content = reply.choices?.[0]?.message?.content || '';
       const { updatedQuestions, appliedCount } = applyLlmDistractorsToQuestions(
@@ -1555,6 +1602,14 @@ function extractCleanTranslationLine(raw: string): string {
   return firstNonEmptyLine.replace(/^["'`]+|["'`]+$/g, '').trim();
 }
 
+const translationResultCache = new Map<
+  string,
+  {
+    translation: string;
+    source: 'webllm' | 'chrome_ai' | 'chrome_translator' | 'ollama' | 'cloud_dict';
+  }
+>();
+
 /**
  * Translates a selected word or phrase into the user's configured target language.
  * - Uses Chrome Built-in AI (`Translator` API or Gemini Nano `LanguageModel`), in-browser WebLLM, or Ollama.
@@ -1574,21 +1629,18 @@ export async function translateSelection(params: {
   source: 'webllm' | 'chrome_ai' | 'chrome_translator' | 'ollama' | 'cloud_dict';
 }> {
   const cleanText = params.text.trim();
+  const cacheKey = `${params.targetLang}:${cleanText.toLowerCase()}`;
+  const cachedHit = translationResultCache.get(cacheKey);
+  if (cachedHit) {
+    return cachedHit;
+  }
+
   const langInfo =
     TRANSLATION_LANGUAGES.find((l) => l.code === params.targetLang) ||
     TRANSLATION_LANGUAGES[0];
 
-  const isSingleWord = !/\s/.test(cleanText);
-  const systemInstruction = `You are a concise English-to-${langInfo.englishName} dictionary. Translate ONLY the given English ${
-    isSingleWord ? 'word' : 'phrase'
-  } into ${
-    langInfo.englishName
-  }. Output ONLY the ${
-    langInfo.englishName
-  } meaning (1 to 3 words, or up to 2 common meanings separated by a comma). Never output full sentences, explanations, or quotes.`;
-  const prompt = `English ${isSingleWord ? 'word' : 'phrase'}: "${cleanText}"\n${
-    langInfo.englishName
-  } meaning:`;
+  const systemInstruction = `You are a concise English-to-${langInfo.englishName} dictionary. Translate ONLY the given English term into ${langInfo.englishName}. Output ONLY the ${langInfo.englishName} meaning (1 to 3 words, or up to 2 common meanings separated by a comma). Never output full sentences, explanations, or quotes.`;
+  const prompt = `English: "${cleanText}"\n${langInfo.englishName}:`;
 
   // 1. If Chrome Built-in AI is selected, try Chrome Translator API first, then Gemini Nano Prompt API
   if (params.provider === 'chrome_ai') {
@@ -1597,13 +1649,20 @@ export async function translateSelection(params: {
       params.targetLang
     );
     if (builtInTrans) {
-      return { translation: builtInTrans, source: 'chrome_translator' };
+      const hit = {
+        translation: builtInTrans,
+        source: 'chrome_translator' as const,
+      };
+      translationResultCache.set(cacheKey, hit);
+      return hit;
     }
     try {
       const raw = await promptChromeBuiltInAi(prompt, systemInstruction);
       const out = extractCleanTranslationLine(raw);
       if (out) {
-        return { translation: out, source: 'chrome_ai' };
+        const hit = { translation: out, source: 'chrome_ai' as const };
+        translationResultCache.set(cacheKey, hit);
+        return hit;
       }
     } catch {
       // Fall through if permitted
@@ -1632,10 +1691,13 @@ export async function translateSelection(params: {
           ? { extra_body: { enable_thinking: false } }
           : {}),
       });
+      flushMainThreadMemoryPools(engine);
       const rawContent = reply.choices?.[0]?.message?.content || '';
       const out = extractCleanTranslationLine(rawContent);
       if (out) {
-        return { translation: out, source: 'webllm' };
+        const hit = { translation: out, source: 'webllm' as const };
+        translationResultCache.set(cacheKey, hit);
+        return hit;
       }
       webLlmDiagError = 'WebGPU model returned an empty response.';
     } catch (err) {
