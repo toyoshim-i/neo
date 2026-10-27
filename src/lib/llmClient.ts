@@ -363,12 +363,13 @@ function applyLlmDistractorsToQuestions(
 }
 
 // Persist engine singleton on globalThis so Vite HMR updates never drop VRAM state
-const ENGINE_CONFIG_VERSION = 6;
+const ENGINE_CONFIG_VERSION = 7;
 
 type ProgressListener = (text: string, progress: number) => void;
 
 interface GlobalWebLlmState {
   engine: MLCEngineInterface | null;
+  worker: Worker | null;
   loadedModelId: string | null;
   loadingModelId: string | null;
   loadingPromise: Promise<MLCEngineInterface> | null;
@@ -386,8 +387,16 @@ const globalState: GlobalWebLlmState = (() => {
     !g.__WETWARE_WEBLLM__ ||
     g.__WETWARE_WEBLLM__.configVersion !== ENGINE_CONFIG_VERSION
   ) {
+    if (g.__WETWARE_WEBLLM__?.worker) {
+      try {
+        g.__WETWARE_WEBLLM__.worker.terminate();
+      } catch {
+        // Ignore worker termination error
+      }
+    }
     g.__WETWARE_WEBLLM__ = {
       engine: null,
+      worker: null,
       loadedModelId: null,
       loadingModelId: null,
       loadingPromise: null,
@@ -469,9 +478,13 @@ export async function checkCachedWebLlmModels(): Promise<
 }
 
 /**
- * Purges downloaded model weights from browser Cache Storage (disk) and unloads active VRAM.
+ * Explicitly unloads the active WebGPU model from VRAM, terminates the Web Worker
+ * (so 100% of its WebAssembly linear memory and JS heap are synchronously returned to the OS),
+ * and yields across macrotasks so the mobile GPU driver finishes reclaiming unified memory.
  */
-export async function purgeWebLlmDiskCache(): Promise<void> {
+export async function unloadWebLlmEngine(): Promise<void> {
+  const hadActiveResources = Boolean(globalState.engine || globalState.worker);
+
   if (globalState.engine) {
     try {
       await globalState.engine.unload();
@@ -479,8 +492,30 @@ export async function purgeWebLlmDiskCache(): Promise<void> {
       // Ignore unload error
     }
     globalState.engine = null;
-    globalState.loadedModelId = null;
   }
+
+  if (globalState.worker) {
+    try {
+      globalState.worker.terminate();
+    } catch {
+      // Ignore worker termination error
+    }
+    globalState.worker = null;
+  }
+
+  globalState.loadedModelId = null;
+
+  if (hadActiveResources) {
+    // Allow asynchronous GPUDevice.destroy() IPC and OS thread teardown to complete
+    await new Promise((resolve) => setTimeout(resolve, 350));
+  }
+}
+
+/**
+ * Purges downloaded model weights from browser Cache Storage (disk) and unloads active VRAM.
+ */
+export async function purgeWebLlmDiskCache(): Promise<void> {
+  await unloadWebLlmEngine();
 
   try {
     const { deleteModelAllInfoInCache, prebuiltAppConfig } = await import(
@@ -515,9 +550,10 @@ export async function purgeWebLlmDiskCache(): Promise<void> {
 }
 
 /**
- * Initializes (or reuses) the in-browser WebGPU MLC Engine with a compact 256-token
- * KV cache window (`context_window_size: 256`) so mobile devices don't waste 1+ GB of VRAM
- * on a 4096-token KV cache.
+ * Initializes (or reuses) the in-browser WebGPU MLC Engine inside a dedicated Web Worker
+ * with a compact 256-token KV cache window (`context_window_size: 256`).
+ * Running inside a Worker allows `worker.terminate()` on model switch to deterministically
+ * free 100% of WASM linear memory and JS heap alongside `GPUDevice.destroy()`.
  */
 export async function initWebLlmEngine(
   modelId: string = DEFAULT_WEBLLM_MODEL,
@@ -529,9 +565,11 @@ export async function initWebLlmEngine(
     );
   }
 
-  const { CreateMLCEngine, prebuiltAppConfig } = await import(
-    '@mlc-ai/web-llm'
-  );
+  const {
+    CreateMLCEngine,
+    CreateWebWorkerMLCEngine,
+    prebuiltAppConfig,
+  } = await import('@mlc-ai/web-llm');
   const matchedRecord = prebuiltAppConfig.model_list.find(
     (m) => m.model_id.toLowerCase() === modelId.toLowerCase()
   );
@@ -561,6 +599,8 @@ export async function initWebLlmEngine(
     return globalState.loadingPromise;
   }
 
+  const priorLoadPromise = globalState.loadingPromise;
+
   const notifyProgress = (report: {
     text: string;
     progress: number;
@@ -581,25 +621,69 @@ export async function initWebLlmEngine(
   globalState.loadingModelId = resolvedModelId;
   const loadTask = (async (): Promise<MLCEngineInterface> => {
     try {
-      // Explicitly unload any previous model first so WebGPU buffers never overlap in unified memory
-      if (globalState.engine) {
+      if (priorLoadPromise) {
         try {
-          await globalState.engine.unload();
+          await priorLoadPromise;
         } catch {
-          // Ignore unload error
+          // Ignore prior aborted load error
         }
-        globalState.engine = null;
-        globalState.loadedModelId = null;
       }
 
-      const engine = await CreateMLCEngine(
-        resolvedModelId,
-        {
-          appConfig: prebuiltAppConfig,
-          initProgressCallback: notifyProgress,
-        },
-        chatOpts
-      );
+      // Explicitly unload previous GPU buffers AND terminate the previous Worker isolate
+      // so WebGPU unified memory and WASM linear heaps never overlap when switching models
+      if (globalState.engine || globalState.worker) {
+        notifyProgress({
+          text: 'Releasing previous model VRAM & WASM heap...',
+          progress: 0,
+        });
+        await unloadWebLlmEngine();
+      }
+
+      let engine: MLCEngineInterface;
+      if (typeof Worker !== 'undefined') {
+        try {
+          const worker = new Worker(
+            new URL('./webllmWorker.ts', import.meta.url),
+            { type: 'module' }
+          );
+          globalState.worker = worker;
+          engine = await CreateWebWorkerMLCEngine(
+            worker,
+            resolvedModelId,
+            {
+              appConfig: prebuiltAppConfig,
+              initProgressCallback: notifyProgress,
+            },
+            chatOpts
+          );
+        } catch {
+          if (globalState.worker) {
+            try {
+              globalState.worker.terminate();
+            } catch {
+              // Ignore worker termination error
+            }
+            globalState.worker = null;
+          }
+          engine = await CreateMLCEngine(
+            resolvedModelId,
+            {
+              appConfig: prebuiltAppConfig,
+              initProgressCallback: notifyProgress,
+            },
+            chatOpts
+          );
+        }
+      } else {
+        engine = await CreateMLCEngine(
+          resolvedModelId,
+          {
+            appConfig: prebuiltAppConfig,
+            initProgressCallback: notifyProgress,
+          },
+          chatOpts
+        );
+      }
 
       globalState.engine = engine;
       globalState.loadedModelId = resolvedModelId;

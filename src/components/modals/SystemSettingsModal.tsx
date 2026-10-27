@@ -25,6 +25,7 @@ import {
   TRANSLATION_LANGUAGES,
   translateWithChromeBuiltInTranslator,
   TranslationLangCode,
+  unloadWebLlmEngine,
   WEBLLM_MODEL_OPTIONS,
   WebLlmModelId,
 } from '../../lib/llmClient';
@@ -394,10 +395,14 @@ export function SystemSettingsModal({
                           key={m.id}
                           type="button"
                           disabled={isPreloadingWebLlm}
-                          onClick={() => {
+                          onClick={async () => {
                             soundEngine.playUiClick();
                             setSelectedWebLlmModel(m.id);
                             saveWebLlmModelSelection(m.id);
+                            if (isWebLlmReady() && !isWebLlmReady(m.id)) {
+                              setWebLlmStatus('RELEASING PREVIOUS MODEL VRAM...');
+                              await unloadWebLlmEngine();
+                            }
                             setWebLlmStatus(
                               isWebLlmReady(m.id)
                                 ? 'READY IN VRAM'
@@ -430,20 +435,37 @@ export function SystemSettingsModal({
                     <span className="text-[#FFE600] truncate">
                       STATUS: {webLlmStatus}
                     </span>
-                    <button
-                      type="button"
-                      disabled={isPreloadingWebLlm}
-                      onClick={async () => {
-                        soundEngine.playUiClick();
-                        await purgeWebLlmDiskCache();
-                        const updatedCache = await checkCachedWebLlmModels();
-                        setCachedModels(updatedCache);
-                        setWebLlmStatus('DISK CACHE PURGED & VRAM UNLOADED');
-                      }}
-                      className="text-[9px] text-[#6C7A89] hover:text-[#FF1E7A] underline shrink-0 cursor-pointer"
-                    >
-                      PURGE DISK CACHE
-                    </button>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {isWebLlmReady() && (
+                        <button
+                          type="button"
+                          disabled={isPreloadingWebLlm}
+                          onClick={async () => {
+                            soundEngine.playUiClick();
+                            setWebLlmStatus('RELEASING VRAM...');
+                            await unloadWebLlmEngine();
+                            setWebLlmStatus('VRAM UNLOADED (0 MB RAM)');
+                          }}
+                          className="text-[9px] text-[#FFE600] hover:text-[#00F5D4] underline cursor-pointer"
+                        >
+                          UNLOAD VRAM
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        disabled={isPreloadingWebLlm}
+                        onClick={async () => {
+                          soundEngine.playUiClick();
+                          await purgeWebLlmDiskCache();
+                          const updatedCache = await checkCachedWebLlmModels();
+                          setCachedModels(updatedCache);
+                          setWebLlmStatus('DISK CACHE PURGED & VRAM UNLOADED');
+                        }}
+                        className="text-[9px] text-[#6C7A89] hover:text-[#FF1E7A] underline cursor-pointer"
+                      >
+                        PURGE DISK CACHE
+                      </button>
+                    </div>
                   </div>
                   <button
                     type="button"
