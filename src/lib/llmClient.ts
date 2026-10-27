@@ -1006,9 +1006,17 @@ export async function translateSelection(params: {
     TRANSLATION_LANGUAGES.find((l) => l.code === params.targetLang) ||
     TRANSLATION_LANGUAGES[0];
 
-  const prompt = params.contextSentence
-    ? `Translate "${cleanText}" into ${langInfo.englishName} (used in: "${params.contextSentence}"). Output ONLY the concise ${langInfo.englishName} translation in one short line:`
-    : `Translate "${cleanText}" into ${langInfo.englishName}. Output ONLY the concise ${langInfo.englishName} translation in one short line:`;
+  const isSingleWord = !/\s/.test(cleanText);
+  const systemInstruction = `You are a concise English-to-${langInfo.englishName} dictionary. Translate ONLY the given English ${
+    isSingleWord ? 'word' : 'phrase'
+  } into ${
+    langInfo.englishName
+  }. Output ONLY the ${
+    langInfo.englishName
+  } meaning (1 to 3 words, or up to 2 common meanings separated by a comma). Never output full sentences, explanations, or quotes.`;
+  const prompt = `English ${isSingleWord ? 'word' : 'phrase'}: "${cleanText}"\n${
+    langInfo.englishName
+  } meaning:`;
 
   // 1. If WebLLM is selected AND already loaded in VRAM, run on-device translation
   if (params.provider === 'webllm' && isWebLlmReady(params.webLlmModel)) {
@@ -1017,9 +1025,12 @@ export async function translateSelection(params: {
         params.webLlmModel || DEFAULT_WEBLLM_MODEL
       );
       const reply = await engine.chat.completions.create({
-        messages: [{ role: 'user', content: prompt }],
+        messages: [
+          { role: 'system', content: systemInstruction },
+          { role: 'user', content: prompt },
+        ],
         temperature: 0.1,
-        max_tokens: 48,
+        max_tokens: 32,
       });
       const out = (reply.choices?.[0]?.message?.content || '')
         .replace(/<think>[\s\S]*?<\/think>/gi, '')
@@ -1046,13 +1057,16 @@ export async function translateSelection(params: {
       const body = isOpenAiCompat
         ? JSON.stringify({
             model: params.llmModel || 'gemma2:2b',
-            messages: [{ role: 'user', content: prompt }],
+            messages: [
+              { role: 'system', content: systemInstruction },
+              { role: 'user', content: prompt },
+            ],
             temperature: 0.1,
-            max_tokens: 48,
+            max_tokens: 32,
           })
         : JSON.stringify({
             model: params.llmModel || 'gemma2:2b',
-            prompt,
+            prompt: `${systemInstruction}\n\n${prompt}`,
             stream: false,
           });
       const res = await fetch(url, {
