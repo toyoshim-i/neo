@@ -277,7 +277,7 @@ export function SystemSettingsModal({
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
                 {(
                   [
-                    { id: 'webllm', label: 'WEBGPU (GEMMA)' },
+                    { id: 'webllm', label: 'WEBGPU (BONSAI/GEMMA)' },
                     { id: 'chrome_ai', label: 'CHROME AI (NANO)' },
                     { id: 'ollama', label: 'OLLAMA API' },
                     { id: 'rule_based', label: 'RULE-BASED' },
@@ -375,14 +375,16 @@ export function SystemSettingsModal({
               {llmProvider === 'webllm' && (
                 <div className="p-2.5 bg-[#0D0618] border border-[#FFE600]/40 space-y-2.5">
                   <div className="flex items-center justify-between text-[10px]">
-                    <span className="text-[#6C7A89]">SELECT GEMMA TIER</span>
+                    <span className="text-[#6C7A89]">
+                      SELECT WEBGPU MODEL (BONSAI 1-BIT / GEMMA FP32)
+                    </span>
                     <span className="text-[#00F5D4] font-bold">
                       {isWebGpuSupported() ? 'WEBGPU OK' : 'NO WEBGPU'}
                     </span>
                   </div>
 
-                  {/* 2-Model Selector (Gemma 2 2B / Gemma 4 E2B) */}
-                  <div className="grid grid-cols-2 gap-1.5">
+                  {/* WebGPU Model Selector (Bonsai 1-bit / Ternary 1.58-bit / Gemma FP32) */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                     {WEBLLM_MODEL_OPTIONS.map((m) => {
                       const active = selectedWebLlmModel === m.id;
                       const isCached = cachedModels[m.id];
@@ -403,17 +405,20 @@ export function SystemSettingsModal({
                                 : 'NOT DOWNLOADED'
                             );
                           }}
-                          className={`cyber-btn p-1.5 border text-left transition-all ${
+                          className={`cyber-btn p-2 border text-left transition-all ${
                             active
                               ? 'border-[#00F5D4] bg-[#00F5D4]/15 text-[#F2F5F8]'
                               : 'border-[#6C7A89]/40 bg-[#0D0618] text-[#6C7A89] hover:border-[#00F5D4]/50'
                           }`}
                         >
-                          <div className="text-[10px] font-bold text-[#00F5D4] flex items-center justify-between">
+                          <div className="text-[10px] font-bold text-[#00F5D4] flex items-center justify-between gap-1">
                             <span>{m.label}</span>
+                            <span className="text-[9px] text-[#FFE600] shrink-0">
+                              {isCached ? '✓ CACHED' : `~${m.vram}`}
+                            </span>
                           </div>
-                          <div className="text-[9px] text-[#FFE600]">
-                            {isCached ? '✓ CACHED' : `~${m.vram}`}
+                          <div className="text-[9px] text-[#6C7A89] truncate mt-0.5">
+                            {m.desc}
                           </div>
                         </button>
                       );

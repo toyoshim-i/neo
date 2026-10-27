@@ -100,6 +100,9 @@ export function App() {
   const [cachedModels, setCachedModels] = useState<
     Record<WebLlmModelId, boolean>
   >({
+    'bonsai-1.7b-q1': false,
+    'ternary-bonsai-1.7b-q2': false,
+    'bonsai-4b-q1': false,
     'gemma-2-2b-it-q4f32_1-MLC-1k': false,
     'gemma-4-E2B-it-q4f32_1-MLC': false,
   });

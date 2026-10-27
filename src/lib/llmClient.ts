@@ -1,4 +1,4 @@
-import type { MLCEngineInterface, InitProgressReport } from '@mlc-ai/web-llm';
+import type { MLCEngineInterface } from '@mlc-ai/web-llm';
 import { TrainingPassage, QuizQuestion } from '../types/schema';
 import { buildNormalizedPassage } from './chunker';
 
@@ -28,26 +28,63 @@ export function saveLlmProviderSelection(provider: LlmProviderType): void {
 }
 
 export type WebLlmModelId =
+  | 'bonsai-1.7b-q1'
+  | 'ternary-bonsai-1.7b-q2'
+  | 'bonsai-4b-q1'
   | 'gemma-2-2b-it-q4f32_1-MLC-1k'
   | 'gemma-4-E2B-it-q4f32_1-MLC';
 
-export const WEBLLM_MODEL_OPTIONS: Array<{
+export interface WebGpuModelOption {
   id: WebLlmModelId;
   label: string;
   vram: string;
   desc: string;
-}> = [
+  backend: 'transformers' | 'mlc';
+  hfRepo?: string;
+  dtype?: 'q1' | 'q2';
+}
+
+export const WEBLLM_MODEL_OPTIONS: WebGpuModelOption[] = [
+  {
+    id: 'bonsai-1.7b-q1',
+    label: 'BONSAI 1.7B (1-BIT)',
+    vram: '0.3 GB',
+    desc: '1-bit Qwen3 (277 MB, Mobile Safe, Recommended)',
+    backend: 'transformers',
+    hfRepo: 'onnx-community/Bonsai-1.7B-ONNX',
+    dtype: 'q1',
+  },
+  {
+    id: 'ternary-bonsai-1.7b-q2',
+    label: 'TERNARY BONSAI 1.7B',
+    vram: '0.5 GB',
+    desc: '1.58-bit Ternary Qwen3 (482 MB, High Accuracy)',
+    backend: 'transformers',
+    hfRepo: 'onnx-community/Ternary-Bonsai-1.7B-ONNX',
+    dtype: 'q2',
+  },
+  {
+    id: 'bonsai-4b-q1',
+    label: 'BONSAI 4B (1-BIT)',
+    vram: '0.6 GB',
+    desc: '1-bit 4B Qwen3 (625 MB, Mobile/Tablet 4B)',
+    backend: 'transformers',
+    hfRepo: 'onnx-community/Bonsai-4B-ONNX',
+    dtype: 'q1',
+  },
   {
     id: 'gemma-2-2b-it-q4f32_1-MLC-1k',
     label: 'GEMMA 2 2B (F32)',
     vram: '1.9 GB',
-    desc: 'FP32 compute (Safe on mobile GPUs)',
+    desc: '4-bit MLC FP32 (Desktop / 8GB+ Tablet)',
+    backend: 'mlc',
   },
   {
     id: 'gemma-4-E2B-it-q4f32_1-MLC',
     label: 'GEMMA 4 E2B (F32)',
     vram: '3.8 GB',
-    desc: 'FP32 high-capacity tier',
+    desc: '4-bit MLC FP32 High-Capacity Desktop Tier',
+    backend: 'mlc',
   },
 ];
 
@@ -65,7 +102,7 @@ export function getSavedWebLlmModel(): WebLlmModelId {
       return saved as WebLlmModelId;
     }
   }
-  return 'gemma-2-2b-it-q4f32_1-MLC-1k';
+  return 'bonsai-1.7b-q1';
 }
 
 export function saveWebLlmModelSelection(modelId: WebLlmModelId): void {
@@ -311,12 +348,13 @@ function applyLlmDistractorsToQuestions(
 }
 
 // Persist engine singleton on globalThis so Vite HMR updates never drop VRAM state
-const ENGINE_CONFIG_VERSION = 4;
+const ENGINE_CONFIG_VERSION = 5;
 
 type ProgressListener = (text: string, progress: number) => void;
 
 interface GlobalWebLlmState {
   engine: MLCEngineInterface | null;
+  loadedBackend: 'transformers' | 'mlc' | null;
   loadedModelId: string | null;
   loadingModelId: string | null;
   loadingPromise: Promise<MLCEngineInterface> | null;
@@ -336,6 +374,7 @@ const globalState: GlobalWebLlmState = (() => {
   ) {
     g.__WETWARE_WEBLLM__ = {
       engine: null,
+      loadedBackend: null,
       loadedModelId: null,
       loadingModelId: null,
       loadingPromise: null,
@@ -379,27 +418,54 @@ export function getLoadedWebLlmModelId(): string | null {
 }
 
 /**
- * Checks which of the 3 Gemma models are already stored in the browser's persistent Cache Storage
+ * Checks which WebGPU models (Bonsai ONNX in `transformers-cache` + Gemma MLC in WebLLM cache)
+ * are already stored in the browser's persistent Cache Storage.
  */
 export async function checkCachedWebLlmModels(): Promise<
   Record<WebLlmModelId, boolean>
 > {
   const result: Record<WebLlmModelId, boolean> = {
+    'bonsai-1.7b-q1': false,
+    'ternary-bonsai-1.7b-q2': false,
+    'bonsai-4b-q1': false,
     'gemma-2-2b-it-q4f32_1-MLC-1k': false,
     'gemma-4-E2B-it-q4f32_1-MLC': false,
   };
+
   try {
+    // 1. Check Transformers.js cache (`transformers-cache`) for Bonsai ONNX models
+    if (typeof window !== 'undefined' && 'caches' in window) {
+      try {
+        const tfCache = await window.caches.open('transformers-cache');
+        const keys = await tfCache.keys();
+        const urls = keys.map((req) => req.url);
+        for (const opt of WEBLLM_MODEL_OPTIONS) {
+          if (opt.backend === 'transformers' && opt.hfRepo && opt.dtype) {
+            const dataFile = `model_${opt.dtype}.onnx_data`;
+            result[opt.id] = urls.some(
+              (u) => u.includes(opt.hfRepo!) && u.includes(dataFile)
+            );
+          }
+        }
+      } catch {
+        // Ignore if transformers-cache cannot be opened
+      }
+    }
+
+    // 2. Check MLC WebLLM cache for Gemma models
     const { hasModelInCache, prebuiltAppConfig } = await import(
       '@mlc-ai/web-llm'
     );
     await Promise.all(
-      WEBLLM_MODEL_OPTIONS.map(async (opt) => {
-        try {
-          result[opt.id] = await hasModelInCache(opt.id, prebuiltAppConfig);
-        } catch {
-          result[opt.id] = false;
+      WEBLLM_MODEL_OPTIONS.filter((opt) => opt.backend === 'mlc').map(
+        async (opt) => {
+          try {
+            result[opt.id] = await hasModelInCache(opt.id, prebuiltAppConfig);
+          } catch {
+            result[opt.id] = false;
+          }
         }
-      })
+      )
     );
   } catch {
     // Ignore if Cache API unavailable
@@ -408,7 +474,9 @@ export async function checkCachedWebLlmModels(): Promise<
 }
 
 /**
- * Initializes (or reuses) the in-browser WebGPU MLC Engine
+ * Initializes (or reuses) the in-browser WebGPU LLM Engine:
+ * - Supports PrismML Bonsai 1-bit (`q1`) & Ternary 1.58-bit (`q2`) via `@huggingface/transformers` WebGPU
+ * - Supports Gemma 2 2B & Gemma 4 E2B via `@mlc-ai/web-llm` WebGPU
  */
 export async function initWebLlmEngine(
   modelId: string = DEFAULT_WEBLLM_MODEL,
@@ -420,42 +488,20 @@ export async function initWebLlmEngine(
     );
   }
 
-  const { CreateMLCEngine, prebuiltAppConfig } = await import(
-    '@mlc-ai/web-llm'
+  const matchedOption = WEBLLM_MODEL_OPTIONS.find(
+    (m) => m.id.toLowerCase() === modelId.toLowerCase()
   );
-  const matchedRecord = prebuiltAppConfig.model_list.find(
-    (m) => m.model_id.toLowerCase() === modelId.toLowerCase()
-  );
-  const resolvedModelId = matchedRecord ? matchedRecord.model_id : modelId;
-
-  // gemma3-1b-it-q4f16_1_cs1k-webgpu.wasm is compiled with AttnKind::kMHASliding
-  // (sliding_window_size: 512). Setting sliding_window_size: -1 disables sliding
-  // window KV cache setup (`fKVCacheEnableSlidingWindowForSeq`), causing uninitialized
-  // KV cache reads and random token output. Instead, set context_window_size: -1,
-  // sliding_window_size: 512, attention_sink_size: 0 for gemma3-1b.
-  const isGemma3SlidingWindow = resolvedModelId
-    .toLowerCase()
-    .includes('gemma3-1b');
-  const chatOpts = isGemma3SlidingWindow
-    ? {
-        context_window_size: -1,
-        sliding_window_size: 512,
-        attention_sink_size: 0,
-      }
-    : undefined;
 
   if (
     globalState.engine &&
-    globalState.loadedModelId?.toLowerCase() === resolvedModelId.toLowerCase()
+    globalState.loadedModelId?.toLowerCase() === modelId.toLowerCase()
   ) {
     return globalState.engine;
   }
 
-  // If a download/load for the same model is already running in the background,
-  // attach the progress callback and reuse the in-flight promise instead of starting a second load.
   if (
     globalState.loadingPromise &&
-    globalState.loadingModelId?.toLowerCase() === resolvedModelId.toLowerCase()
+    globalState.loadingModelId?.toLowerCase() === modelId.toLowerCase()
   ) {
     if (onProgress) {
       const unsub = subscribeWebLlmProgress(onProgress);
@@ -464,7 +510,11 @@ export async function initWebLlmEngine(
     return globalState.loadingPromise;
   }
 
-  const notifyProgress = (report: InitProgressReport) => {
+  const notifyProgress = (report: {
+    text: string;
+    progress: number;
+    timeElapsed?: number;
+  }) => {
     globalState.lastProgressText = report.text;
     globalState.lastProgressRatio = report.progress;
     onProgress?.(report.text, report.progress);
@@ -477,26 +527,193 @@ export async function initWebLlmEngine(
     });
   };
 
+  // Path A: PrismML Bonsai 1-bit / 1.58-bit Ternary via `@huggingface/transformers` (WebGPU)
+  if (
+    matchedOption &&
+    matchedOption.backend === 'transformers' &&
+    matchedOption.hfRepo &&
+    matchedOption.dtype
+  ) {
+    const resolvedId = matchedOption.id;
+    const hfRepo = matchedOption.hfRepo;
+    const dtype = matchedOption.dtype;
+
+    globalState.loadingModelId = resolvedId;
+    const loadTask = (async (): Promise<MLCEngineInterface> => {
+      try {
+        // Free any previously loaded WebGPU engine before allocating new GPU buffers
+        if (globalState.engine) {
+          try {
+            await globalState.engine.unload();
+          } catch {
+            // Ignore unload error
+          }
+          globalState.engine = null;
+          globalState.loadedModelId = null;
+          globalState.loadedBackend = null;
+        }
+
+        notifyProgress({
+          text: `Initializing ${matchedOption.label} (${dtype.toUpperCase()} WebGPU)...`,
+          progress: 0.02,
+        });
+
+        const { pipeline } = await import('@huggingface/transformers');
+        const generator = await pipeline('text-generation', hfRepo, {
+          device: 'webgpu',
+          dtype,
+          progress_callback: (info: {
+            status?: string;
+            file?: string;
+            progress?: number;
+            loaded?: number;
+            total?: number;
+          }) => {
+            if (
+              info.status === 'progress_total' &&
+              typeof info.progress === 'number'
+            ) {
+              const ratio = Math.max(0.03, Math.min(0.98, info.progress / 100));
+              const loadedMb = Math.round((info.loaded || 0) / 1048576);
+              const totalMb = Math.round((info.total || 0) / 1048576);
+              notifyProgress({
+                text:
+                  totalMb > 0
+                    ? `Downloading ${matchedOption.label} (${loadedMb}/${totalMb} MB)...`
+                    : `Loading ${matchedOption.label} (${Math.round(
+                        info.progress
+                      )}%)...`,
+                progress: ratio,
+              });
+            } else if (
+              info.status === 'progress' &&
+              typeof info.progress === 'number' &&
+              info.file?.includes('onnx_data')
+            ) {
+              const ratio = Math.max(0.03, Math.min(0.98, info.progress / 100));
+              const loadedMb = Math.round((info.loaded || 0) / 1048576);
+              const totalMb = Math.round((info.total || 0) / 1048576);
+              notifyProgress({
+                text:
+                  totalMb > 0
+                    ? `Fetching ${info.file} (${loadedMb}/${totalMb} MB)...`
+                    : `Fetching ${info.file} (${Math.round(info.progress)}%)...`,
+                progress: ratio,
+              });
+            } else if (info.status === 'ready') {
+              notifyProgress({
+                text: `${matchedOption.label} ready in WebGPU`,
+                progress: 1,
+              });
+            }
+          },
+        });
+
+        const adapter = {
+          chat: {
+            completions: {
+              create: async (req: {
+                messages: Array<{ role: string; content: string }>;
+                temperature?: number;
+                max_tokens?: number;
+              }) => {
+                const temp = req.temperature ?? 0.3;
+                const useSampling = temp > 0.15;
+                const out = await generator(
+                  req.messages as Array<{ role: string; content: string }>,
+                  {
+                    max_new_tokens: req.max_tokens ?? 64,
+                    do_sample: useSampling,
+                    ...(useSampling ? { temperature: temp } : {}),
+                  }
+                );
+                const firstItem = Array.isArray(out) ? out[0] : out;
+                const genText = (
+                  firstItem as {
+                    generated_text?:
+                      | Array<{ role: string; content: string }>
+                      | string;
+                  }
+                )?.generated_text;
+                const content = Array.isArray(genText)
+                  ? genText[genText.length - 1]?.content || ''
+                  : typeof genText === 'string'
+                  ? genText
+                  : '';
+                return {
+                  choices: [
+                    {
+                      message: {
+                        content: String(content),
+                      },
+                    },
+                  ],
+                };
+              },
+            },
+          },
+          unload: async () => {
+            await generator.dispose?.();
+          },
+        } as unknown as MLCEngineInterface;
+
+        notifyProgress({
+          text: `${matchedOption.label} ready in WebGPU`,
+          progress: 1,
+        });
+
+        globalState.engine = adapter;
+        globalState.loadedBackend = 'transformers';
+        globalState.loadedModelId = resolvedId;
+        return adapter;
+      } finally {
+        globalState.loadingPromise = null;
+        globalState.loadingModelId = null;
+      }
+    })();
+
+    globalState.loadingPromise = loadTask;
+    return loadTask;
+  }
+
+  // Path B: MLC WebLLM (`gemma-2-2b-it-q4f32_1-MLC-1k` / `gemma-4-E2B-it-q4f32_1-MLC`)
+  const { CreateMLCEngine, prebuiltAppConfig } = await import(
+    '@mlc-ai/web-llm'
+  );
+  const matchedRecord = prebuiltAppConfig.model_list.find(
+    (m) => m.model_id.toLowerCase() === modelId.toLowerCase()
+  );
+  const resolvedModelId = matchedRecord ? matchedRecord.model_id : modelId;
+
   globalState.loadingModelId = resolvedModelId;
   const loadTask = (async (): Promise<MLCEngineInterface> => {
     try {
-      if (globalState.engine) {
+      // If switching from Transformers.js pipeline to MLC engine, dispose the Transformers pipeline first
+      if (globalState.engine && globalState.loadedBackend === 'transformers') {
+        try {
+          await globalState.engine.unload();
+        } catch {
+          // Ignore unload error
+        }
+        globalState.engine = null;
+        globalState.loadedModelId = null;
+        globalState.loadedBackend = null;
+      }
+
+      if (globalState.engine && globalState.loadedBackend === 'mlc') {
         globalState.engine.setInitProgressCallback(notifyProgress);
-        await globalState.engine.reload(resolvedModelId, chatOpts);
+        await globalState.engine.reload(resolvedModelId);
         globalState.loadedModelId = resolvedModelId;
         return globalState.engine;
       }
 
-      const engine = await CreateMLCEngine(
-        resolvedModelId,
-        {
-          appConfig: prebuiltAppConfig,
-          initProgressCallback: notifyProgress,
-        },
-        chatOpts
-      );
+      const engine = await CreateMLCEngine(resolvedModelId, {
+        appConfig: prebuiltAppConfig,
+        initProgressCallback: notifyProgress,
+      });
 
       globalState.engine = engine;
+      globalState.loadedBackend = 'mlc';
       globalState.loadedModelId = resolvedModelId;
       return engine;
     } finally {
