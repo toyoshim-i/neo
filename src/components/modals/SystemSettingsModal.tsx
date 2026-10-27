@@ -239,10 +239,10 @@ export function SystemSettingsModal({
               <div className="pt-2 flex items-center justify-between gap-3">
                 <div>
                   <div className="text-[11px] text-[#F2F5F8] font-bold">
-                    EXTERNAL TRANSLATE SERVER API (CLOUD FALLBACK)
+                    EXTERNAL TRANSLATION API (CLOUD FALLBACK)
                   </div>
                   <div className="text-[10px] text-[#6C7A89]">
-                    Query Google Translate Server / MyMemory when local AI
+                    Query MyMemory external translation API when local AI
                     (WebLLM / Chrome Built-in AI) is unavailable. Default: OFF.
                   </div>
                 </div>

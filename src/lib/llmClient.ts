@@ -1408,58 +1408,13 @@ export async function translateWithChromeBuiltInTranslator(
 }
 
 /**
- * Translates via Google Translate Server (`translate.googleapis.com/translate_a/single`)
- * with dictionary part-of-speech lookup (`dt=bd`) for single words, falling back to MyMemory.
+ * Translates via MyMemory Translation API (`api.mymemory.translated.net`)
+ * when the user explicitly opts into External Translation API fallback.
  */
 async function translateViaCloudServer(
   cleanText: string,
   targetLang: TranslationLangCode
 ): Promise<string> {
-  // 1. Primary: Google Translate Server API (supports dictionary meanings on single words via dt=bd)
-  try {
-    const gUrl = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=${encodeURIComponent(
-      targetLang
-    )}&dt=t&dt=bd&q=${encodeURIComponent(cleanText)}`;
-    const gRes = await fetch(gUrl);
-    if (gRes.ok) {
-      const gData = await gRes.json();
-      const primarySegments: string[] = Array.isArray(gData?.[0])
-        ? gData[0]
-            .map((seg: unknown) => (Array.isArray(seg) ? String(seg[0] || '') : ''))
-            .filter(Boolean)
-        : [];
-      const primaryText = primarySegments.join('').trim();
-
-      // If single word and dictionary terms exist in gData[1], include up to 2 concise dictionary senses
-      const dictTerms: string[] = [];
-      if (!/\s/.test(cleanText) && Array.isArray(gData?.[1])) {
-        for (const posEntry of gData[1]) {
-          if (Array.isArray(posEntry?.[1])) {
-            for (const wordSense of posEntry[1].slice(0, 2)) {
-              if (
-                typeof wordSense === 'string' &&
-                wordSense.trim() &&
-                wordSense.trim() !== primaryText &&
-                !dictTerms.includes(wordSense.trim())
-              ) {
-                dictTerms.push(wordSense.trim());
-              }
-            }
-          }
-        }
-      }
-
-      if (primaryText) {
-        return dictTerms.length > 0
-          ? `${primaryText} (${dictTerms.slice(0, 2).join(', ')})`
-          : primaryText;
-      }
-    }
-  } catch {
-    // Fall back to MyMemory below
-  }
-
-  // 2. Secondary Fallback: MyMemory API
   const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(
     cleanText
   )}&langpair=en|${encodeURIComponent(targetLang)}`;
@@ -1595,7 +1550,7 @@ const translationResultCache = new Map<
 /**
  * Translates a selected word or phrase into the user's configured target language.
  * - Uses Chrome Built-in AI (`Translator` API or Gemini Nano `LanguageModel`), in-browser WebLLM, or Ollama.
- * - When local engines are unavailable and `allowCloudApi` is enabled in CONFIG, queries Google Translate Server / MyMemory.
+ * - When local engines are unavailable and `allowCloudApi` is enabled in CONFIG, queries MyMemory API.
  */
 export async function translateSelection(params: {
   text: string;
@@ -1742,13 +1697,13 @@ export async function translateSelection(params: {
     return { translation: localBrowserTranslator, source: 'chrome_translator' };
   }
 
-  // 5. External Translate Server API (Google Translate Server + MyMemory; Opt-In Default OFF)
+  // 5. External Translation API (MyMemory; Opt-In Default OFF)
   if (!params.allowCloudApi) {
     if (webLlmDiagError) {
       throw new Error(`WebGPU LLM error: ${webLlmDiagError}`);
     }
     throw new Error(
-      'Local AI offline. Enable Chrome Built-in AI, load a WebGPU LLM, or turn ON "External Translate Server API" in CONFIG.'
+      'Local AI offline. Enable Chrome Built-in AI, load a WebGPU LLM, or turn ON "External Translation API" in CONFIG.'
     );
   }
 
