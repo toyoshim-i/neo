@@ -109,6 +109,10 @@ export function SystemSettingsModal({
   const [isTestingChromeAi, setIsTestingChromeAi] = useState<boolean>(false);
 
   useEffect(() => {
+    checkCachedWebLlmModels().then(setCachedModels);
+  }, [setCachedModels]);
+
+  useEffect(() => {
     if (llmProvider === 'chrome_ai') {
       checkChromePromptApiAvailability().then((info) => {
         setChromeAiStatus(info.detail);

@@ -255,6 +255,9 @@ export function App() {
       setWebLlmProgressPct(pct);
       setIsPreloadingWebLlm(pct < 100);
       setWebLlmStatus(`${pct}% // ${text}`);
+      if (pct >= 100) {
+        checkCachedWebLlmModels().then(setCachedModels);
+      }
     });
     return () => unsub();
   }, []);

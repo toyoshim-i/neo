@@ -433,9 +433,23 @@ export function isQwen3Model(modelId?: string | null): boolean {
   return Boolean(modelId && modelId.toLowerCase().includes('qwen3'));
 }
 
+const MODEL_CACHE_BASE_URLS: Record<WebLlmModelId, string> = {
+  'Qwen3-0.6B-q4f32_1-MLC':
+    'https://huggingface.co/mlc-ai/Qwen3-0.6B-q4f32_1-MLC/resolve/main/',
+  'Qwen2.5-1.5B-Instruct-q4f32_1-MLC':
+    'https://huggingface.co/mlc-ai/Qwen2.5-1.5B-Instruct-q4f32_1-MLC/resolve/main/',
+  'Qwen3-1.7B-q4f32_1-MLC':
+    'https://huggingface.co/mlc-ai/Qwen3-1.7B-q4f32_1-MLC/resolve/main/',
+  'gemma-2-2b-it-q4f32_1-MLC-1k':
+    'https://huggingface.co/mlc-ai/gemma-2-2b-it-q4f32_1-MLC/resolve/main/',
+  'gemma-4-E2B-it-q4f32_1-MLC':
+    'https://huggingface.co/mlc-ai/gemma-4-E2B-it-q4f32_1-MLC/resolve/main/',
+};
+
 /**
- * Checks which WebGPU models are already stored in the browser's persistent Cache Storage.
- * Note: Cached models reside on disk storage and consume 0 bytes of RAM/VRAM until loaded.
+ * Checks which WebGPU models are already stored in the browser's persistent Cache Storage (`webllm/model`).
+ * Directly inspects `window.caches` with a single `cache.keys()` pass (<5ms) instead of dynamically
+ * importing the 6.15 MB `@mlc-ai/web-llm` bundle or calling `cache.keys()` 10 separate times.
  */
 export async function checkCachedWebLlmModels(): Promise<
   Record<WebLlmModelId, boolean>
@@ -448,14 +462,45 @@ export async function checkCachedWebLlmModels(): Promise<
     'gemma-4-E2B-it-q4f32_1-MLC': false,
   };
 
+  if (typeof window === 'undefined' || !('caches' in window)) {
+    return result;
+  }
+
   try {
-    const { hasModelInCache, prebuiltAppConfig } = await import(
-      '@mlc-ai/web-llm'
-    );
+    const cache = await window.caches.open('webllm/model');
+    const requests = await cache.keys();
+    if (requests.length === 0) {
+      return result;
+    }
+    const urlSet = new Set(requests.map((r) => r.url));
+
     await Promise.all(
       WEBLLM_MODEL_OPTIONS.map(async (opt) => {
         try {
-          result[opt.id] = await hasModelInCache(opt.id, prebuiltAppConfig);
+          const baseUrl = MODEL_CACHE_BASE_URLS[opt.id];
+          const manifestUrl = `${baseUrl}tensor-cache.json`;
+          if (!urlSet.has(manifestUrl)) {
+            result[opt.id] = false;
+            return;
+          }
+          const manifestRes = await cache.match(manifestUrl);
+          if (!manifestRes) {
+            result[opt.id] = false;
+            return;
+          }
+          const manifestJson = (await manifestRes.json()) as {
+            records?: Array<{ dataPath?: string }>;
+          };
+          const records = Array.isArray(manifestJson?.records)
+            ? manifestJson.records
+            : [];
+          result[opt.id] =
+            records.length > 0 &&
+            records.every(
+              (rec) =>
+                Boolean(rec.dataPath) &&
+                urlSet.has(new URL(rec.dataPath!, baseUrl).href)
+            );
         } catch {
           result[opt.id] = false;
         }
@@ -497,19 +542,6 @@ export async function unloadWebLlmEngine(): Promise<void> {
 export async function purgeWebLlmDiskCache(): Promise<void> {
   await unloadWebLlmEngine();
 
-  try {
-    const { deleteModelAllInfoInCache, prebuiltAppConfig } = await import(
-      '@mlc-ai/web-llm'
-    );
-    await Promise.all(
-      WEBLLM_MODEL_OPTIONS.map((opt) =>
-        deleteModelAllInfoInCache(opt.id, prebuiltAppConfig).catch(() => {})
-      )
-    );
-  } catch {
-    // Ignore if web-llm cache deletion fails
-  }
-
   if (typeof window !== 'undefined' && 'caches' in window) {
     try {
       const keys = await window.caches.keys();
@@ -519,6 +551,7 @@ export async function purgeWebLlmDiskCache(): Promise<void> {
             (k) =>
               k.includes('webllm') ||
               k.includes('mlc') ||
+              k.includes('tvmjs') ||
               k.includes('transformers-cache')
           )
           .map((k) => window.caches.delete(k))
