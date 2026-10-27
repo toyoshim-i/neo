@@ -11,6 +11,181 @@ interface TachistoscopeViewProps {
 
 const TOTAL_ROUNDS = 8;
 
+const FALLBACK_WORDS = [
+  'system',
+  'signal',
+  'visual',
+  'memory',
+  'neural',
+  'active',
+  'stream',
+  'window',
+  'target',
+  'cortex',
+  'motion',
+  'rapid',
+  'steady',
+  'direct',
+  'modern',
+  'global',
+  'native',
+  'pattern',
+  'network',
+  'process',
+  'context',
+  'pathway',
+  'control',
+  'balance',
+  'thought',
+  'reading',
+  'horizon',
+  'impulse',
+];
+
+function splitTokenPunctuation(token: string): {
+  lead: string;
+  core: string;
+  trail: string;
+} {
+  const match = token.match(/^([^A-Za-z0-9]*)([A-Za-z0-9'-]+)([^A-Za-z0-9]*)$/);
+  if (!match) {
+    return { lead: '', core: token, trail: '' };
+  }
+  return {
+    lead: match[1] || '',
+    core: match[2] || token,
+    trail: match[3] || '',
+  };
+}
+
+function matchCasingAndPunctuation(
+  originalToken: string,
+  replacementCore: string
+): string {
+  const { lead, core, trail } = splitTokenPunctuation(originalToken);
+  if (!core) return originalToken;
+
+  let formatted = replacementCore.toLowerCase();
+  if (core.length > 1 && core === core.toUpperCase()) {
+    formatted = replacementCore.toUpperCase();
+  } else if (core[0] === core[0].toUpperCase()) {
+    formatted =
+      replacementCore.charAt(0).toUpperCase() +
+      replacementCore.slice(1).toLowerCase();
+  }
+  return `${lead}${formatted}${trail}`;
+}
+
+/**
+ * Builds 4 options where distractors share the same leading/middle/trailing words
+ * and only swap 1 word at left, middle, or right peripheral positions.
+ * This prevents answering by only reading the first word and forces full-span intake.
+ */
+function buildPeripheralSpanOptions(
+  targetChunk: string,
+  allChunks: string[]
+): string[] {
+  const tokens = targetChunk.trim().split(/\s+/);
+  const existingCores = new Set(
+    tokens.map((t) => splitTokenPunctuation(t).core.toLowerCase())
+  );
+
+  // Extract candidate words from the passage + fallback pool
+  const rawPool: string[] = [];
+  for (const ch of allChunks) {
+    for (const w of ch.split(/\s+/)) {
+      const { core } = splitTokenPunctuation(w);
+      if (core.length >= 2 && /^[A-Za-z'-]+$/.test(core)) {
+        rawPool.push(core.toLowerCase());
+      }
+    }
+  }
+  for (const fw of FALLBACK_WORDS) {
+    rawPool.push(fw);
+  }
+  const uniquePool = Array.from(new Set(rawPool));
+
+  const usedReplacements = new Set<string>();
+
+  const pickFoilForToken = (token: string): string => {
+    const { core } = splitTokenPunctuation(token);
+    const targetLen = core.length;
+
+    // Prefer words within ±2 character length so word silhouette looks natural
+    let candidates = uniquePool.filter(
+      (w) =>
+        !existingCores.has(w) &&
+        !usedReplacements.has(w) &&
+        Math.abs(w.length - targetLen) <= 2
+    );
+    if (candidates.length === 0) {
+      candidates = uniquePool.filter(
+        (w) => !existingCores.has(w) && !usedReplacements.has(w)
+      );
+    }
+    const chosen =
+      candidates[Math.floor(Math.random() * candidates.length)] || 'signal';
+    usedReplacements.add(chosen);
+    return matchCasingAndPunctuation(token, chosen);
+  };
+
+  let distractors: string[] = [];
+
+  if (tokens.length === 1) {
+    const f1 = pickFoilForToken(tokens[0]);
+    const f2 = pickFoilForToken(tokens[0]);
+    const f3 = pickFoilForToken(tokens[0]);
+    distractors = [f1, f2, f3];
+  } else if (tokens.length === 2) {
+    // Symmetric 2x2 matrix: [W1 W2, W1 X2, X1 W2, X1 X2]
+    // Neither the first word nor the second word alone reveals the answer!
+    const [w1, w2] = tokens;
+    const x1 = pickFoilForToken(w1);
+    const x2 = pickFoilForToken(w2);
+    distractors = [
+      `${w1} ${x2}`, // Same 1st word, different 2nd word
+      `${x1} ${w2}`, // Different 1st word, same 2nd word
+      `${x1} ${x2}`, // Paired foil so each word appears twice
+    ];
+  } else if (tokens.length === 3) {
+    // 3-word span: 3 of 4 choices share the 1st word, 3 share the middle, 3 share the last!
+    const [w1, w2, w3] = tokens;
+    const x1 = pickFoilForToken(w1);
+    const x2 = pickFoilForToken(w2);
+    const x3 = pickFoilForToken(w3);
+    distractors = [
+      `${w1} ${w2} ${x3}`, // Right-edge swap (tests right peripheral vision)
+      `${w1} ${x2} ${w3}`, // Center swap (tests middle word)
+      `${x1} ${w2} ${w3}`, // Left-edge swap (tests left peripheral vision)
+    ];
+  } else {
+    // 4+ words: swap rightmost, inner-right, and leftmost words
+    const lastIdx = tokens.length - 1;
+    const midIdx = tokens.length - 2;
+    const xFirst = pickFoilForToken(tokens[0]);
+    const xMid = pickFoilForToken(tokens[midIdx]);
+    const xLast = pickFoilForToken(tokens[lastIdx]);
+
+    const dRight = [...tokens];
+    dRight[lastIdx] = xLast;
+
+    const dMid = [...tokens];
+    dMid[midIdx] = xMid;
+
+    const dLeft = [...tokens];
+    dLeft[0] = xFirst;
+
+    distractors = [dRight.join(' '), dMid.join(' '), dLeft.join(' ')];
+  }
+
+  const combined = [targetChunk, ...distractors];
+  for (let i = combined.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [combined[i], combined[j]] = [combined[j], combined[i]];
+  }
+  return combined;
+}
+
 export const TachistoscopeView: React.FC<TachistoscopeViewProps> = ({
   passage,
   targetWpm,
@@ -27,17 +202,16 @@ export const TachistoscopeView: React.FC<TachistoscopeViewProps> = ({
 
   const setupRound = useCallback(
     (roundIdx: number) => {
-      const pool = passage.chunks.filter((c) => c.length >= 8);
-      const sourcePool = pool.length >= 8 ? pool : passage.chunks;
+      // Prefer multi-word chunks (2+ words) so peripheral width is genuinely tested
+      const multiWordPool = passage.chunks.filter(
+        (c) => c.trim().split(/\s+/).length >= 2 && c.length >= 8
+      );
+      const sourcePool =
+        multiWordPool.length >= 4 ? multiWordPool : passage.chunks;
       const chosenIdx = (roundIdx * 7 + 3) % sourcePool.length;
       const target = sourcePool[chosenIdx];
 
-      const distractors = sourcePool
-        .filter((c) => c !== target)
-        .sort(() => Math.random() - 0.5)
-        .slice(0, 3);
-
-      const combined = [target, ...distractors].sort(() => Math.random() - 0.5);
+      const combined = buildPeripheralSpanOptions(target, passage.chunks);
       setTargetChunk(target);
       setOptions(combined);
       setPhase('ready');
@@ -116,21 +290,25 @@ export const TachistoscopeView: React.FC<TachistoscopeViewProps> = ({
         {/* Flash Reticle Window */}
         <div className="h-32 bg-[#0D0618] border border-[#00F5D4]/50 flex items-center justify-center relative">
           <div className="absolute top-2 left-3 font-terminal text-[10px] text-[#6C7A89]">
-            EXPOSURE: {flashMs} MS
+            EXPOSURE: {flashMs} MS // FULL-SPAN CHECK
           </div>
+          {/* Subtle top/bottom center reticle ticks */}
+          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-0.5 h-2.5 bg-[#FF1E7A]/70" />
+          <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-0.5 h-2.5 bg-[#FF1E7A]/70" />
+
           {phase === 'ready' && (
             <span className="font-terminal text-xs text-[#6C7A89] animate-pulse">
-              [ LOCK GAZE AT RETICLE + ]
+              [ LOCK GAZE AT CENTER RETICLE + CAPTURE ALL WORDS ]
             </span>
           )}
           {phase === 'flashing' && (
-            <span className="font-terminal text-2xl sm:text-4xl font-bold text-[#00F5D4] tracking-wide select-none">
+            <span className="font-terminal text-2xl sm:text-4xl font-bold text-[#00F5D4] tracking-wide select-none px-4">
               {targetChunk}
             </span>
           )}
           {phase === 'choosing' && (
             <span className="font-terminal text-xs text-[#FFE600]">
-              SELECT MATCHING CHUNK (KEYS 1–4)
+              VERIFY ALL WORDS — LEFT, CENTER &amp; RIGHT (KEYS 1–4)
             </span>
           )}
         </div>
