@@ -1607,12 +1607,12 @@ export function App() {
                 return (
                   <span key={idx}>
                     <span
-                      className={`inline py-0.5 border-y-2 transition-colors duration-75 ${
+                      className={`inline py-0.5 border-b-2 transition-colors duration-75 ${
                         isActive
                           ? 'bg-[#FFE600]/20 border-[#FFE600] text-[#F2F5F8]'
                           : isPassed
-                          ? 'bg-transparent border-[#180B29] text-[#6C7A89]/50'
-                          : 'bg-transparent border-[#180B29] text-[#6C7A89]'
+                          ? 'bg-transparent border-transparent text-[#6C7A89]/50'
+                          : 'bg-transparent border-transparent text-[#6C7A89]'
                       }`}
                     >
                       {chunk}
@@ -2153,12 +2153,12 @@ export function App() {
                         );
                       }}
                       title="Tap any word or phrase to translate"
-                      className={`inline py-0.5 border-y-2 cursor-pointer transition-colors duration-75 ${
+                      className={`inline py-0.5 border-b-2 cursor-pointer transition-colors duration-75 ${
                         isSelectedInPopup
                           ? 'bg-[#00F5D4]/20 border-[#00F5D4] text-[#F2F5F8]'
                           : isChecked
                           ? 'bg-[#FFE600]/10 border-[#FFE600]/80 text-[#F2F5F8]'
-                          : 'bg-transparent border-[#180B29] text-[#F2F5F8]/90 hover:border-[#00F5D4]/60 hover:bg-[#00F5D4]/10'
+                          : 'bg-transparent border-transparent text-[#F2F5F8]/90 hover:border-[#00F5D4]/60 hover:bg-[#00F5D4]/10'
                       }`}
                     >
                       {chunk}
@@ -2370,12 +2370,12 @@ export function App() {
                           style={{
                             opacity: isPassed && fadeOutPassed ? 0.15 : 1,
                           }}
-                          className={`inline py-0.5 border-y-2 cursor-pointer transition-colors duration-75 ${
+                          className={`inline py-0.5 border-b-2 cursor-pointer transition-colors duration-75 ${
                             isActive
                               ? isMarker
                                 ? 'bg-[#FF1E7A]/15 border-[#FF1E7A] text-[#F2F5F8]'
                                 : 'bg-[#00F5D4]/15 border-[#00F5D4] text-[#F2F5F8]'
-                              : 'bg-transparent border-[#180B29] text-[#6C7A89]'
+                              : 'bg-transparent border-transparent text-[#6C7A89]'
                           }`}
                         >
                           {chunk}
