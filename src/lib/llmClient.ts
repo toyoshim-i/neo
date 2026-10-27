@@ -1599,7 +1599,110 @@ function extractCleanTranslationLine(raw: string): string {
       .split('\n')
       .map((line) => line.trim())
       .find((line) => line.length > 0) || '';
-  return firstNonEmptyLine.replace(/^["'`]+|["'`]+$/g, '').trim();
+  return firstNonEmptyLine
+    .replace(/^(?:日本語訳|日本語|意味|訳|Translation|Meaning)\s*[:：]\s*/i, '')
+    .replace(/^["'「『`]+|["'」』`]+$/g, '')
+    .trim();
+}
+
+function isValidTargetLanguageTranslation(
+  output: string,
+  sourceText: string,
+  targetLang: TranslationLangCode
+): boolean {
+  if (!output) return false;
+  const cleanOut = output.trim();
+  const cleanSrc = sourceText.trim();
+  if (cleanOut.toLowerCase() === cleanSrc.toLowerCase()) {
+    return false;
+  }
+  if (targetLang === 'ja') {
+    // Must contain at least one Hiragana, Katakana, or CJK Kanji character
+    return /[\u3040-\u30FF\u3400-\u4DBF\u4E00-\u9FFF]/.test(cleanOut);
+  }
+  if (targetLang === 'zh-CN' || targetLang === 'zh-TW') {
+    return /[\u3400-\u4DBF\u4E00-\u9FFF]/.test(cleanOut);
+  }
+  if (targetLang === 'ko') {
+    return /[\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F]/.test(cleanOut);
+  }
+  return cleanOut.length > 0;
+}
+
+function buildTranslationChatMessages(
+  cleanText: string,
+  targetLang: TranslationLangCode,
+  englishName: string
+): Array<{ role: 'system' | 'user' | 'assistant'; content: string }> {
+  if (targetLang === 'ja') {
+    return [
+      {
+        role: 'system',
+        content:
+          'あなたは英和辞典です。入力された英語の簡潔な日本語訳のみを出力してください。英単語や類義語、説明文は絶対に出力しないでください。',
+      },
+      {
+        role: 'user',
+        content: 'rapid',
+      },
+      {
+        role: 'assistant',
+        content: '急速な、速い',
+      },
+      {
+        role: 'user',
+        content: 'extract vital cues',
+      },
+      {
+        role: 'assistant',
+        content: '重要な手がかりを抽出する',
+      },
+      {
+        role: 'user',
+        content: cleanText,
+      },
+    ];
+  }
+
+  const examplesByLang: Record<
+    Exclude<TranslationLangCode, 'ja'>,
+    [string, string]
+  > = {
+    'zh-CN': ['快速的、迅速的', '提取重要线索'],
+    'zh-TW': ['快速的、迅速的', '提取重要線索'],
+    ko: ['빠른, 신속한', '중요한 단서를 추출하다'],
+    es: ['rápido, veloz', 'extraer pistas vitales'],
+    fr: ['rapide, véloce', 'extraire des indices vitaux'],
+    de: ['schnell, rasch', 'wichtige Hinweise extrahieren'],
+  };
+  const [ex1, ex2] = examplesByLang[targetLang];
+
+  return [
+    {
+      role: 'system',
+      content: `You are an English-to-${englishName} dictionary. Output ONLY the concise ${englishName} translation. Never output English words or synonyms.`,
+    },
+    {
+      role: 'user',
+      content: 'rapid',
+    },
+    {
+      role: 'assistant',
+      content: ex1,
+    },
+    {
+      role: 'user',
+      content: 'extract vital cues',
+    },
+    {
+      role: 'assistant',
+      content: ex2,
+    },
+    {
+      role: 'user',
+      content: cleanText,
+    },
+  ];
 }
 
 const translationResultCache = new Map<
@@ -1680,26 +1783,54 @@ export async function translateSelection(params: {
       const modelId =
         getLoadedWebLlmModelId() || params.webLlmModel || DEFAULT_WEBLLM_MODEL;
       const engine = await initWebLlmEngine(modelId);
+      const chatMessages = buildTranslationChatMessages(
+        cleanText,
+        params.targetLang,
+        langInfo.englishName
+      );
       const reply = await engine.chat.completions.create({
-        messages: [
-          { role: 'system', content: systemInstruction },
-          { role: 'user', content: prompt },
-        ],
+        messages: chatMessages,
         temperature: 0.1,
-        max_tokens: 40,
+        max_tokens: 36,
         ...(isQwen3Model(modelId)
           ? { extra_body: { enable_thinking: false } }
           : {}),
       });
       flushMainThreadMemoryPools(engine);
       const rawContent = reply.choices?.[0]?.message?.content || '';
-      const out = extractCleanTranslationLine(rawContent);
-      if (out) {
+      let out = extractCleanTranslationLine(rawContent);
+
+      // If a small model still returned English instead of the target script, retry once with explicit native suffix
+      if (!isValidTargetLanguageTranslation(out, cleanText, params.targetLang)) {
+        const retryReply = await engine.chat.completions.create({
+          messages: [
+            ...chatMessages.slice(0, -1),
+            {
+              role: 'user',
+              content:
+                params.targetLang === 'ja'
+                  ? `英語「${cleanText}」を日本語に翻訳してください（日本語のみ出力）:`
+                  : `Translate "${cleanText}" into ${langInfo.englishName} (${langInfo.englishName} only):`,
+            },
+          ],
+          temperature: 0.0,
+          max_tokens: 36,
+          ...(isQwen3Model(modelId)
+            ? { extra_body: { enable_thinking: false } }
+            : {}),
+        });
+        flushMainThreadMemoryPools(engine);
+        out = extractCleanTranslationLine(
+          retryReply.choices?.[0]?.message?.content || ''
+        );
+      }
+
+      if (isValidTargetLanguageTranslation(out, cleanText, params.targetLang)) {
         const hit = { translation: out, source: 'webllm' as const };
         translationResultCache.set(cacheKey, hit);
         return hit;
       }
-      webLlmDiagError = 'WebGPU model returned an empty response.';
+      webLlmDiagError = `Model returned non-${langInfo.englishName} output ("${out || 'empty'}")`;
     } catch (err) {
       webLlmDiagError =
         err instanceof Error ? err.message : 'WebGPU translation failed';
