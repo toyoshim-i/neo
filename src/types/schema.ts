@@ -15,11 +15,23 @@ export type TrainingMode =
 
 export type AchievementId =
   | 'NEURAL_CALIBRATED'
-  | 'SUBVOCAL_BREAKER'
+  | 'FIRST_SYNC'
+  | 'L2_FLUENCY_TIER'
   | 'NATIVE_HORIZON'
+  | 'SUBVOCAL_BREAKER'
+  | 'VELOCITY_300'
+  | 'HYPER_SACCADE'
+  | 'APEX_400'
+  | 'PERFECT_SYNC'
+  | 'CRITICAL_REFLEX'
+  | 'FLASH_SNAPSHOT'
+  | 'ORP_LOCKED'
+  | 'TIME_COMPRESSOR'
+  | 'TRI_ENGINE_PILOT'
   | 'OVERCLOCK_MASTER'
   | 'RENAISSANCE_SYNAPSE'
-  | 'HYPER_SACCADE';
+  | 'LIVE_WIRE'
+  | 'MARATHON_CORTEX';
 
 export interface PassageProgress {
   passageId: string;

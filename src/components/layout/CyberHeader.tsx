@@ -29,7 +29,7 @@ export const CyberHeader: React.FC<CyberHeaderProps> = ({
   muted,
   sessionCount,
   achievementCount = 0,
-  totalAchievements = 6,
+  totalAchievements = 18,
   llmDownloadProgressPct = null,
   onToggleMute,
   onOpenHistory,
