@@ -88,7 +88,14 @@ import {
 } from './lib/llmClient';
 import { buildNormalizedPassage } from './lib/chunker';
 
-type ScreenState = 'title' | 'calibration' | 'home' | 'reading' | 'quiz' | 'result';
+type ScreenState =
+  | 'title'
+  | 'calibration'
+  | 'home'
+  | 'preview'
+  | 'reading'
+  | 'quiz'
+  | 'result';
 type AppExperienceMode = 'guided' | 'freeplay';
 type PassageModalTab = 'presets' | 'live' | 'custom';
 
@@ -470,6 +477,9 @@ export function App() {
   const [regressionCount, setRegressionCount] = useState<number>(0);
   const [totalSteps, setTotalSteps] = useState<number>(0);
   const [sessionResetKey, setSessionResetKey] = useState<number>(0);
+  const [previewCheckedIndices, setPreviewCheckedIndices] = useState<number[]>(
+    []
+  );
   const [lexiconPopup, setLexiconPopup] = useState<{
     chunkIdx: number;
     chunkText: string;
@@ -620,6 +630,7 @@ export function App() {
   const selectPassageWithCoaching = useCallback(
     (passageId: string) => {
       setSelectedPassageId(passageId);
+      setPreviewCheckedIndices([]);
       setLexiconPopup(null);
       if (appMode === 'guided') {
         applyGuidedRecommendationForPassage(passageId, profile, targetWpm);
@@ -627,6 +638,13 @@ export function App() {
     },
     [appMode, applyGuidedRecommendationForPassage, profile, targetWpm]
   );
+
+  // Open Untimed Passage Preview & Vocabulary Check Mode
+  const openPreviewMode = () => {
+    soundEngine.playUiClick();
+    setLexiconPopup(null);
+    setScreen('preview');
+  };
 
   // Start Self-Paced Baseline Calibration
   const startCalibrationProbe = () => {
@@ -1337,6 +1355,8 @@ export function App() {
       ? appMode === 'guided'
         ? 'NEURAL COACH'
         : 'FREEPLAY LAB'
+      : screen === 'preview'
+      ? 'PRE-FLIGHT VOCAB SCAN'
       : screen === 'reading'
       ? `TRAINING // ${MODE_INFO[selectedMode].label}`
       : screen === 'quiz'
@@ -1980,28 +2000,184 @@ export function App() {
                 </h2>
               </div>
 
-              <button
-                type="button"
-                onClick={() => {
-                  soundEngine.playUiClick();
-                  setShowPassageModal(true);
-                }}
-                className="cyber-btn px-3.5 py-2 bg-[#0D0618] border border-[#6C7A89]/50 text-xs text-[#F2F5F8] hover:border-[#00F5D4] hover:text-[#00F5D4] shrink-0 flex items-center gap-1.5"
-              >
-                <BookOpen className="w-3.5 h-3.5" />
-                <span>CHANGE PASSAGE</span>
-              </button>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={openPreviewMode}
+                  className="cyber-btn px-3 py-2 bg-[#0D0618] border border-[#FFE600]/60 text-xs text-[#FFE600] hover:bg-[#FFE600]/15 flex items-center gap-1.5"
+                >
+                  <Eye className="w-3.5 h-3.5" />
+                  <span>PREVIEW</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    soundEngine.playUiClick();
+                    setShowPassageModal(true);
+                  }}
+                  className="cyber-btn px-3.5 py-2 bg-[#0D0618] border border-[#6C7A89]/50 text-xs text-[#F2F5F8] hover:border-[#00F5D4] hover:text-[#00F5D4] flex items-center gap-1.5"
+                >
+                  <BookOpen className="w-3.5 h-3.5" />
+                  <span>CHANGE PASSAGE</span>
+                </button>
+              </div>
             </div>
           </ChamferedPanel>
 
-          {/* 3. Primary Call To Action */}
+          {/* 3. Primary Call To Action + Pre-Flight Vocabulary Preview */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <button
+              type="button"
+              onClick={openPreviewMode}
+              className="cyber-btn py-4 px-4 bg-[#180B29] border-2 border-[#FFE600] text-[#FFE600] font-bold text-xs sm:text-sm tracking-wider flex items-center justify-center gap-2 hover:bg-[#FFE600]/15"
+            >
+              <Eye className="w-4 h-4 shrink-0" />
+              <span>PREVIEW TEXT &amp; VOCAB</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={startReadingSession}
+              className="cyber-btn sm:col-span-2 py-4 px-6 bg-[#00F5D4] text-[#0D0618] font-bold text-base sm:text-lg tracking-wider flex items-center justify-center gap-3 shadow-[0_0_25px_rgba(0,245,212,0.35)] hover:brightness-110"
+            >
+              <Zap className="w-5 h-5 fill-current" />
+              <span>START READING SESSION</span>
+              <ChevronRight className="w-5 h-5" />
+            </button>
+          </div>
+        </main>
+      )}
+
+      {/* =========================================================
+          SCREEN 1.5: PASSAGE PREVIEW & VOCABULARY SCAN (Untimed)
+      ========================================================= */}
+      {screen === 'preview' && (
+        <main className="flex-1 max-w-4xl w-full mx-auto px-4 py-6 flex flex-col justify-between gap-5 relative z-20">
+          {/* Top Bar */}
+          <div className="flex flex-wrap items-center justify-between gap-3 bg-[#180B29] border border-[#FFE600]/50 px-4 py-2.5 font-terminal text-xs">
+            <button
+              type="button"
+              onClick={() => {
+                soundEngine.playUiClick();
+                setLexiconPopup(null);
+                setScreen('home');
+              }}
+              className="flex items-center gap-1.5 text-[#6C7A89] hover:text-[#F2F5F8] cursor-pointer"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              <span>BACK TO SETUP</span>
+            </button>
+
+            <div className="flex items-center gap-3">
+              <span className="text-[#FFE600] font-bold flex items-center gap-1.5">
+                <Languages className="w-3.5 h-3.5" />
+                <span>
+                  VOCAB CHECKED: {previewCheckedIndices.length} /{' '}
+                  {selectedPassage.chunks.length} PHRASES
+                </span>
+              </span>
+
+              <button
+                type="button"
+                onClick={startReadingSession}
+                className="cyber-btn px-3 py-1 bg-[#00F5D4] text-[#0D0618] font-bold flex items-center gap-1"
+              >
+                <Zap className="w-3.5 h-3.5 fill-current" />
+                <span>START ({targetWpm} WPM)</span>
+              </button>
+            </div>
+          </div>
+
+          <ChamferedPanel
+            variant="yellow"
+            cutSize={16}
+            tag="PRE-FLIGHT LEXICAL SCAN"
+            title={selectedPassage.title}
+            rightSlot={
+              <span className="text-[#FFE600] font-bold">
+                {selectedPassage.wordCount} WORDS // UNTIMED
+              </span>
+            }
+            className="flex-1 flex flex-col justify-center"
+            innerClassName="p-6 sm:p-10 space-y-5"
+          >
+            <div className="p-3 bg-[#0D0618] border border-[#FFE600]/30 font-terminal text-xs text-[#FFE600] flex flex-wrap items-center justify-between gap-2">
+              <span>
+                Read through the passage at your own pace before starting the
+                timer. <strong>Tap any unfamiliar word or phrase</strong> to
+                inspect its translation and clear lexical bottlenecks.
+              </span>
+              {previewCheckedIndices.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setPreviewCheckedIndices([])}
+                  className="text-[10px] text-[#6C7A89] hover:text-[#F2F5F8] underline cursor-pointer"
+                >
+                  CLEAR MARKS
+                </button>
+              )}
+            </div>
+
+            <div className="leading-[2.2] text-lg sm:text-xl font-medium select-none">
+              {selectedPassage.chunks.map((chunk, idx) => {
+                const isChecked = previewCheckedIndices.includes(idx);
+                const isSelectedInPopup = lexiconPopup?.chunkIdx === idx;
+                return (
+                  <span key={idx}>
+                    <span
+                      data-chunk-interactive="true"
+                      onClick={(e) => {
+                        const hit = extractWordAtClientPoint(
+                          e.clientX,
+                          e.clientY
+                        );
+                        const rect =
+                          hit?.rect ??
+                          (() => {
+                            const r = e.currentTarget.getBoundingClientRect();
+                            return {
+                              x: r.left + r.width / 2,
+                              top: r.top,
+                              bottom: r.bottom,
+                            };
+                          })();
+                        const initialQuery = hit?.word || chunk;
+                        setPreviewCheckedIndices((prev) =>
+                          prev.includes(idx) ? prev : [...prev, idx]
+                        );
+                        void handleTranslateChunkOrWord(
+                          initialQuery,
+                          idx,
+                          chunk,
+                          rect
+                        );
+                      }}
+                      title="Tap any word or phrase to translate"
+                      className={`inline py-0.5 border-y-2 cursor-pointer transition-colors duration-75 ${
+                        isSelectedInPopup
+                          ? 'bg-[#00F5D4]/20 border-[#00F5D4] text-[#F2F5F8]'
+                          : isChecked
+                          ? 'bg-[#FFE600]/10 border-[#FFE600]/80 text-[#F2F5F8]'
+                          : 'bg-transparent border-[#180B29] text-[#F2F5F8]/90 hover:border-[#00F5D4]/60 hover:bg-[#00F5D4]/10'
+                      }`}
+                    >
+                      {chunk}
+                    </span>{' '}
+                  </span>
+                );
+              })}
+            </div>
+          </ChamferedPanel>
+
           <button
             type="button"
             onClick={startReadingSession}
             className="cyber-btn w-full py-4 px-6 bg-[#00F5D4] text-[#0D0618] font-bold text-base sm:text-lg tracking-wider flex items-center justify-center gap-3 shadow-[0_0_25px_rgba(0,245,212,0.35)] hover:brightness-110"
           >
             <Zap className="w-5 h-5 fill-current" />
-            <span>START READING SESSION</span>
+            <span>
+              VOCABULARY READY — START TIMED SESSION ({targetWpm} WPM)
+            </span>
             <ChevronRight className="w-5 h-5" />
           </button>
         </main>
