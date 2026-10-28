@@ -1,7 +1,11 @@
 import {
   HachiueEngine,
   clearModelCache,
+  fetchGgufHeader,
   isModelCached,
+  streamModelChunks,
+  type ParsedGgufHeader,
+  type StorageOptions,
 } from '../../third_party/hachiue/src/index';
 import { TrainingPassage, QuizQuestion } from '../types/schema';
 import { buildNormalizedPassage } from './chunker';
@@ -543,9 +547,85 @@ export async function purgeWebLlmDiskCache(): Promise<void> {
   }
 }
 
+async function prefetchGgufToCache(
+  url: string,
+  options: StorageOptions = {}
+): Promise<ParsedGgufHeader> {
+  const header = await fetchGgufHeader(url, options);
+  await streamModelChunks(
+    url,
+    0,
+    header.totalFileSize,
+    async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    },
+    options
+  );
+  return header;
+}
+
+/**
+ * Downloads a GGUF model to OPFS / IndexedDB cache without allocating WebGPU buffers or unloading the active VRAM model.
+ */
+export async function prefetchWebLlmModelToCache(
+  modelId: string = DEFAULT_WEBLLM_MODEL,
+  onProgress?: (text: string, progress: number) => void
+): Promise<ParsedGgufHeader> {
+  const matchedOption =
+    WEBLLM_MODEL_OPTIONS.find(
+      (m) => m.id.toLowerCase() === modelId.toLowerCase()
+    ) || WEBLLM_MODEL_OPTIONS[1];
+
+  const notifyProgress = (report: { text: string; progress: number }) => {
+    globalState.lastProgressText = report.text;
+    globalState.lastProgressRatio = report.progress;
+    onProgress?.(report.text, report.progress);
+    globalState.listeners.forEach((fn) => {
+      try {
+        fn(report.text, report.progress);
+      } catch {
+        // Ignore listener error
+      }
+    });
+  };
+
+  const header = await prefetchGgufToCache(matchedOption.url, {
+    onProgress: (p) => {
+      if (p.phase === 'weights' && p.totalBytes) {
+        const ratio =
+          p.loadedBytes !== undefined ? p.loadedBytes / p.totalBytes : 0;
+        const mb = ((p.loadedBytes ?? 0) / 1048576).toFixed(0);
+        const totMb = (p.totalBytes / 1048576).toFixed(0);
+        notifyProgress({
+          text: `${
+            p.cached ? 'Verifying cache' : 'Downloading to cache (GPU kept active)'
+          }: ${mb} / ${totMb} MiB`,
+          progress: ratio,
+        });
+      } else if (p.message) {
+        notifyProgress({
+          text: p.message,
+          progress: globalState.lastProgressRatio,
+        });
+      }
+    },
+  });
+
+  notifyProgress({
+    text: `Cached ${matchedOption.label} on disk`,
+    progress: 1,
+  });
+  return header;
+}
+
 /**
  * Initializes (or reuses) the in-browser `hachiue` WebGPU engine for Bonsai 1 (1-bit Q1_0)
  * and Bonsai 2 (Ternary 1.58-bit PTQ1_0 / PQ2_0 + FWHT + Qwen3.5 Gated DeltaNet) GGUF models.
+ *
+ * When switching from an active model in VRAM to a model that is not yet downloaded:
+ * - Phase 1 streams the new model to OPFS / IndexedDB cache FIRST while keeping the previous
+ *   model active in VRAM so translations continue uninterrupted during the download.
+ * - Phase 2 unloads the previous model from VRAM and loads the new model from local cache.
  */
 export async function initWebLlmEngine(
   modelId: string = DEFAULT_WEBLLM_MODEL,
@@ -607,10 +687,46 @@ export async function initWebLlmEngine(
         }
       }
 
+      // Phase 1: If the target model is not cached yet, download it to OPFS / IndexedDB FIRST
+      // while keeping the previous model active in VRAM (`globalState.engine`) so the user
+      // can continue translating with the previous model until the download finishes!
+      const alreadyCached = await isModelCached(matchedOption.url).catch(
+        () => false
+      );
+      if (!alreadyCached) {
+        await prefetchGgufToCache(matchedOption.url, {
+          onProgress: (p) => {
+            if (p.phase === 'weights' && p.totalBytes) {
+              const ratio =
+                p.loadedBytes !== undefined
+                  ? (p.loadedBytes / p.totalBytes) * 0.85
+                  : 0;
+              const mb = ((p.loadedBytes ?? 0) / 1048576).toFixed(0);
+              const totMb = (p.totalBytes / 1048576).toFixed(0);
+              const activeNote = globalState.loadedModelId
+                ? ` (${globalState.loadedModelId} active)`
+                : '';
+              notifyProgress({
+                text: `Downloading to cache${activeNote}: ${mb} / ${totMb} MiB`,
+                progress: ratio,
+              });
+            } else if (p.message) {
+              notifyProgress({
+                text: p.message,
+                progress: globalState.lastProgressRatio,
+              });
+            }
+          },
+        });
+      }
+
+      // Phase 2: Wait for any in-flight inference on the previous model, then swap VRAM
+      await runSerializedInference(async () => {});
+
       if (globalState.engine) {
         notifyProgress({
-          text: 'Releasing previous model VRAM...',
-          progress: 0,
+          text: 'Swapping VRAM to new model...',
+          progress: alreadyCached ? 0 : 0.86,
         });
         await unloadWebLlmEngine();
       }
@@ -620,15 +736,16 @@ export async function initWebLlmEngine(
         maxSeqLen: 512,
         onProgress: (p) => {
           if (p.phase === 'weights' && p.totalBytes) {
-            const ratio =
+            const rawRatio =
               p.loadedBytes !== undefined ? p.loadedBytes / p.totalBytes : 0;
+            const scaledRatio = alreadyCached
+              ? rawRatio
+              : 0.86 + rawRatio * 0.14;
             const mb = ((p.loadedBytes ?? 0) / 1048576).toFixed(0);
             const totMb = (p.totalBytes / 1048576).toFixed(0);
             notifyProgress({
-              text: `${
-                p.cached ? 'Loading cached GGUF' : 'Streaming 16MiB Range'
-              }: ${mb} / ${totMb} MiB`,
-              progress: ratio,
+              text: `Uploading cached GGUF to WebGPU: ${mb} / ${totMb} MiB`,
+              progress: scaledRatio,
             });
           } else if (p.message) {
             notifyProgress({
@@ -1044,7 +1161,12 @@ export async function processPassageWithOptionalLlm(params: {
   // Tier A: In-Browser WebGPU (`hachiue` Bonsai 1 & 2) — Ultra-lightweight distractor word generation
   if (params.provider === 'webllm') {
     try {
-      const modelId = params.webLlmModel || DEFAULT_WEBLLM_MODEL;
+      const requestedModel = params.webLlmModel || DEFAULT_WEBLLM_MODEL;
+      const activeLoadedModel = getLoadedWebLlmModelId();
+      const modelId =
+        isWebLlmLoading() && activeLoadedModel
+          ? activeLoadedModel
+          : requestedModel;
       const engine = await initWebLlmEngine(modelId, (text, progress) => {
         const pct = Math.round(progress * 100);
         params.onProgress?.(`[WebGPU ${pct}%] ${text}`);

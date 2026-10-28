@@ -11,10 +11,12 @@ import {
 import {
   checkCachedWebLlmModels,
   checkChromePromptApiAvailability,
+  getLoadedWebLlmModelId,
   initWebLlmEngine,
   isWebGpuSupported,
   isWebLlmReady,
   LlmProviderType,
+  prefetchWebLlmModelToCache,
   processPassageWithOptionalLlm,
   promptChromeBuiltInAi,
   purgeWebLlmDiskCache,
@@ -389,30 +391,32 @@ export function SystemSettingsModal({
                     </span>
                   </div>
 
-                  {/* WebGPU Model Selector (Qwen3 No-Think / Qwen2.5 / Gemma FP32) */}
+                  {/* WebGPU Model Selector (Bonsai 1 & 2 GGUF) */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                     {WEBLLM_MODEL_OPTIONS.map((m) => {
                       const active = selectedWebLlmModel === m.id;
                       const isCached = cachedModels[m.id];
+                      const inVram = isWebLlmReady(m.id);
                       return (
                         <button
                           key={m.id}
                           type="button"
                           disabled={isPreloadingWebLlm}
-                          onClick={async () => {
+                          onClick={() => {
                             soundEngine.playUiClick();
                             setSelectedWebLlmModel(m.id);
                             saveWebLlmModelSelection(m.id);
-                            if (isWebLlmReady() && !isWebLlmReady(m.id)) {
-                              setWebLlmStatus('RELEASING PREVIOUS MODEL VRAM...');
-                              await unloadWebLlmEngine();
-                            }
+                            const currentGpuModel = getLoadedWebLlmModelId();
+                            const gpuSuffix =
+                              currentGpuModel && currentGpuModel !== m.id
+                                ? ` // ACTIVE GPU: ${currentGpuModel}`
+                                : '';
                             setWebLlmStatus(
                               isWebLlmReady(m.id)
                                 ? 'READY IN VRAM'
                                 : isCached
-                                ? 'CACHED ON DISK (0 MB RAM UNTIL LOADED)'
-                                : 'NOT DOWNLOADED'
+                                ? `CACHED ON DISK${gpuSuffix}`
+                                : `NOT DOWNLOADED${gpuSuffix}`
                             );
                           }}
                           className={`cyber-btn p-2 border text-left transition-all ${
@@ -424,7 +428,11 @@ export function SystemSettingsModal({
                           <div className="text-[10px] font-bold text-[#00F5D4] flex items-center justify-between gap-1">
                             <span>{m.label}</span>
                             <span className="text-[9px] text-[#FFE600] shrink-0">
-                              {isCached ? '✓ CACHED' : `~${m.vram}`}
+                              {inVram
+                                ? '⚡ GPU READY'
+                                : isCached
+                                ? '✓ CACHED'
+                                : `~${m.vram}`}
                             </span>
                           </div>
                           <div className="text-[9px] text-[#6C7A89] truncate mt-0.5">
@@ -471,49 +479,85 @@ export function SystemSettingsModal({
                       </button>
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    disabled={isPreloadingWebLlm}
-                    onClick={() => {
-                      setIsPreloadingWebLlm(true);
-                      setWebLlmProgressPct(0);
-                      void initWebLlmEngine(selectedWebLlmModel)
-                        .then(async () => {
-                          setWebLlmStatus('READY IN VRAM');
-                          const updatedCache = await checkCachedWebLlmModels();
-                          setCachedModels(updatedCache);
-                          soundEngine.playQuizCorrect(false);
-                        })
-                        .catch((e) => {
-                          setWebLlmStatus(
-                            e instanceof Error ? e.message : 'Load error'
-                          );
-                        })
-                        .finally(() => {
-                          setIsPreloadingWebLlm(false);
-                          setWebLlmProgressPct(null);
-                        });
-                    }}
-                    className="cyber-btn w-full py-1.5 bg-[#FFE600]/15 border border-[#FFE600] text-[#FFE600] font-bold text-[10px] hover:bg-[#FFE600]/25"
-                  >
-                    {isPreloadingWebLlm
-                      ? `DOWNLOADING IN BACKGROUND (${
-                          webLlmProgressPct ?? 0
-                        }%) — SAFE TO CLOSE CONFIG`
-                      : isWebLlmReady(selectedWebLlmModel)
-                      ? 'MODEL LOADED IN VRAM (READY)'
-                      : cachedModels[selectedWebLlmModel]
-                      ? `LOAD CACHED ${
-                          WEBLLM_MODEL_OPTIONS.find(
-                            (m) => m.id === selectedWebLlmModel
-                          )?.label
-                        } INTO VRAM`
-                      : `DOWNLOAD & LOAD ${
-                          WEBLLM_MODEL_OPTIONS.find(
-                            (m) => m.id === selectedWebLlmModel
-                          )?.label
-                        }`}
-                  </button>
+                  <div className="flex flex-col sm:flex-row gap-1.5">
+                    <button
+                      type="button"
+                      disabled={isPreloadingWebLlm}
+                      onClick={() => {
+                        setIsPreloadingWebLlm(true);
+                        setWebLlmProgressPct(0);
+                        void initWebLlmEngine(selectedWebLlmModel)
+                          .then(async () => {
+                            setWebLlmStatus('READY IN VRAM');
+                            const updatedCache = await checkCachedWebLlmModels();
+                            setCachedModels(updatedCache);
+                            soundEngine.playQuizCorrect(false);
+                          })
+                          .catch((e) => {
+                            setWebLlmStatus(
+                              e instanceof Error ? e.message : 'Load error'
+                            );
+                          })
+                          .finally(() => {
+                            setIsPreloadingWebLlm(false);
+                            setWebLlmProgressPct(null);
+                          });
+                      }}
+                      className="cyber-btn flex-1 py-1.5 px-2 bg-[#FFE600]/15 border border-[#FFE600] text-[#FFE600] font-bold text-[10px] hover:bg-[#FFE600]/25"
+                    >
+                      {isPreloadingWebLlm
+                        ? `DOWNLOADING IN BACKGROUND (${
+                            webLlmProgressPct ?? 0
+                          }%) — SAFE TO CLOSE CONFIG`
+                        : isWebLlmReady(selectedWebLlmModel)
+                        ? 'MODEL LOADED IN VRAM (READY)'
+                        : cachedModels[selectedWebLlmModel]
+                        ? `LOAD CACHED ${
+                            WEBLLM_MODEL_OPTIONS.find(
+                              (m) => m.id === selectedWebLlmModel
+                            )?.label
+                          } INTO VRAM`
+                        : `DOWNLOAD & LOAD ${
+                            WEBLLM_MODEL_OPTIONS.find(
+                              (m) => m.id === selectedWebLlmModel
+                            )?.label
+                          }`}
+                    </button>
+                    {!cachedModels[selectedWebLlmModel] && !isPreloadingWebLlm && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsPreloadingWebLlm(true);
+                          setWebLlmProgressPct(0);
+                          void prefetchWebLlmModelToCache(selectedWebLlmModel)
+                            .then(async () => {
+                              const updatedCache = await checkCachedWebLlmModels();
+                              setCachedModels(updatedCache);
+                              const activeGpu = getLoadedWebLlmModelId();
+                              setWebLlmStatus(
+                                activeGpu
+                                  ? `CACHED ON DISK // ACTIVE GPU: ${activeGpu}`
+                                  : 'CACHED ON DISK (0 MB GPU VRAM)'
+                              );
+                              soundEngine.playQuizCorrect(false);
+                            })
+                            .catch((e) => {
+                              setWebLlmStatus(
+                                e instanceof Error ? e.message : 'Prefetch error'
+                              );
+                            })
+                            .finally(() => {
+                              setIsPreloadingWebLlm(false);
+                              setWebLlmProgressPct(null);
+                            });
+                        }}
+                        className="cyber-btn py-1.5 px-2.5 bg-[#00F5D4]/10 border border-[#00F5D4]/70 text-[#00F5D4] font-bold text-[10px] hover:bg-[#00F5D4]/20 shrink-0"
+                        title="Download GGUF weights to OPFS/IndexedDB cache without touching WebGPU VRAM"
+                      >
+                        CACHE ONLY (NO GPU)
+                      </button>
+                    )}
+                  </div>
                 </div>
               )}
 
