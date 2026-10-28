@@ -25,7 +25,20 @@ export function getSavedLlmProvider(): LlmProviderType | null {
   return null;
 }
 
+const translationResultCache = new Map<
+  string,
+  {
+    translation: string;
+    source: 'webllm' | 'chrome_ai' | 'chrome_translator' | 'ollama' | 'cloud_dict';
+  }
+>();
+
+export function clearTranslationResultCache(): void {
+  translationResultCache.clear();
+}
+
 export function saveLlmProviderSelection(provider: LlmProviderType): void {
+  translationResultCache.clear();
   if (typeof window !== 'undefined') {
     window.localStorage.setItem(LLM_PROVIDER_STORAGE_KEY, provider);
   }
@@ -110,6 +123,7 @@ export function getSavedWebLlmModel(): WebLlmModelId {
 }
 
 export function saveWebLlmModelSelection(modelId: WebLlmModelId): void {
+  translationResultCache.clear();
   if (typeof window !== 'undefined') {
     window.localStorage.setItem(MODEL_STORAGE_KEY, modelId);
   }
@@ -483,6 +497,7 @@ export async function checkCachedWebLlmModels(): Promise<
  * and yields across macrotasks so the mobile GPU driver finishes reclaiming unified memory.
  */
 export async function unloadWebLlmEngine(): Promise<void> {
+  translationResultCache.clear();
   const hadActiveEngine = Boolean(globalState.engine);
 
   if (globalState.engine) {
@@ -630,6 +645,7 @@ export async function initWebLlmEngine(
 
       globalState.engine = engine;
       globalState.loadedModelId = resolvedModelId;
+      translationResultCache.clear();
       return engine;
     } finally {
       globalState.loadingPromise = null;
@@ -1552,14 +1568,6 @@ function buildTranslationChatMessages(
   ];
 }
 
-const translationResultCache = new Map<
-  string,
-  {
-    translation: string;
-    source: 'webllm' | 'chrome_ai' | 'chrome_translator' | 'ollama' | 'cloud_dict';
-  }
->();
-
 /**
  * Translates a selected word or phrase into the user's configured target language.
  * - Uses Chrome Built-in AI (`Translator` API or Gemini Nano `LanguageModel`), in-browser WebLLM, or Ollama.
@@ -1579,7 +1587,9 @@ export async function translateSelection(params: {
   source: 'webllm' | 'chrome_ai' | 'chrome_translator' | 'ollama' | 'cloud_dict';
 }> {
   const cleanText = params.text.trim();
-  const cacheKey = `${params.targetLang}:${cleanText.toLowerCase()}`;
+  const activeModelScope =
+    getLoadedWebLlmModelId() || params.webLlmModel || DEFAULT_WEBLLM_MODEL;
+  const cacheKey = `${params.provider}:${activeModelScope}:${params.targetLang}:${cleanText.toLowerCase()}`;
   const cachedHit = translationResultCache.get(cacheKey);
   if (cachedHit) {
     return cachedHit;
