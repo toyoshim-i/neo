@@ -1,4 +1,8 @@
-import type { MLCEngineInterface } from '@mlc-ai/web-llm';
+import {
+  HachiueEngine,
+  clearModelCache,
+  isModelCached,
+} from '../../third_party/hachiue/src/index';
 import { TrainingPassage, QuizQuestion } from '../types/schema';
 import { buildNormalizedPassage } from './chunker';
 
@@ -28,14 +32,16 @@ export function saveLlmProviderSelection(provider: LlmProviderType): void {
 }
 
 export type WebLlmModelId =
-  | 'Qwen3-0.6B-q4f32_1-MLC'
-  | 'Qwen2.5-1.5B-Instruct-q4f32_1-MLC'
-  | 'Qwen3-1.7B-q4f32_1-MLC'
-  | 'gemma-2-2b-it-q4f32_1-MLC-1k'
-  | 'gemma-4-E2B-it-q4f32_1-MLC';
+  | 'bonsai-1.7b-q1'
+  | 'bonsai-2-2b-ptq1'
+  | 'bonsai-2-2b-pq2'
+  | 'bonsai-4b-q1'
+  | 'bonsai-2-4b-ptq1'
+  | 'bonsai-2-4b-pq2';
 
 export interface WebGpuModelOption {
   id: WebLlmModelId;
+  url: string;
   label: string;
   vram: string;
   desc: string;
@@ -43,34 +49,46 @@ export interface WebGpuModelOption {
 
 export const WEBLLM_MODEL_OPTIONS: WebGpuModelOption[] = [
   {
-    id: 'Qwen3-0.6B-q4f32_1-MLC',
-    label: 'QWEN 3 0.6B (F32 / NO-THINK)',
-    vram: '0.4 GB',
-    desc: '320 MB weights + 256-ctx KV cache (Mobile Safe, Recommended)',
+    id: 'bonsai-1.7b-q1',
+    url: 'https://huggingface.co/prism-ml/Bonsai-1.7B-gguf/resolve/main/Bonsai-1.7B-Q1_0.gguf',
+    label: 'BONSAI 1.7B // Q1_0 (1-BIT)',
+    vram: '237 MB',
+    desc: 'Ultra-light 1-bit GGUF (Qwen3-1.7B) — ~51 tok/s on iPhone (hachiue)',
   },
   {
-    id: 'Qwen2.5-1.5B-Instruct-q4f32_1-MLC',
-    label: 'QWEN 2.5 1.5B (F32)',
-    vram: '0.9 GB',
-    desc: '828 MB weights + 256-ctx KV cache (1.5B Multilingual)',
+    id: 'bonsai-2-2b-ptq1',
+    url: 'https://huggingface.co/prism-ml/Ternary-Bonsai-2-2B-gguf/resolve/main/Ternary-Bonsai-2-2B-PTQ1_0.gguf',
+    label: 'BONSAI 2 2B // PTQ1_0 (1.58-BIT)',
+    vram: '406 MB',
+    desc: 'Ternary 1.58-bit + FWHT (Qwen3.5-2B) — Recommended for translation',
   },
   {
-    id: 'Qwen3-1.7B-q4f32_1-MLC',
-    label: 'QWEN 3 1.7B (F32 / NO-THINK)',
-    vram: '1.0 GB',
-    desc: '923 MB weights + 256-ctx KV cache (High-Accuracy 1.7B)',
+    id: 'bonsai-2-2b-pq2',
+    url: 'https://huggingface.co/prism-ml/Ternary-Bonsai-2-2B-gguf/resolve/main/Ternary-Bonsai-2-2B-PQ2_0.gguf',
+    label: 'BONSAI 2 2B // PQ2_0 (TERNARY)',
+    vram: '495 MB',
+    desc: 'High-precision Ternary PQ2_0 + FWHT (Qwen3.5-2B, 248k vocab)',
   },
   {
-    id: 'gemma-2-2b-it-q4f32_1-MLC-1k',
-    label: 'GEMMA 2 2B (F32)',
-    vram: '1.5 GB',
-    desc: '1.4 GB weights + 256-ctx KV cache (Tablet / Desktop)',
+    id: 'bonsai-4b-q1',
+    url: 'https://huggingface.co/prism-ml/Bonsai-4B-gguf/resolve/main/Bonsai-4B-Q1_0.gguf',
+    label: 'BONSAI 4B // Q1_0 (1-BIT)',
+    vram: '546 MB',
+    desc: 'Compact 4B 1-bit GGUF (Qwen3-4B) — Fits comfortably in mobile VRAM',
   },
   {
-    id: 'gemma-4-E2B-it-q4f32_1-MLC',
-    label: 'GEMMA 4 E2B (F32)',
-    vram: '3.4 GB',
-    desc: 'High-Capacity Desktop Tier (256-ctx KV cache)',
+    id: 'bonsai-2-4b-ptq1',
+    url: 'https://huggingface.co/prism-ml/Ternary-Bonsai-2-4B-gguf/resolve/main/Ternary-Bonsai-2-4B-PTQ1_0.gguf',
+    label: 'BONSAI 2 4B // PTQ1_0 (1.58-BIT)',
+    vram: '902 MB',
+    desc: 'Flagship 4B Ternary 1.58-bit + FWHT (Qwen3.5-4B) — Best accuracy',
+  },
+  {
+    id: 'bonsai-2-4b-pq2',
+    url: 'https://huggingface.co/prism-ml/Ternary-Bonsai-2-4B-gguf/resolve/main/Ternary-Bonsai-2-4B-PQ2_0.gguf',
+    label: 'BONSAI 2 4B // PQ2_0 (TERNARY)',
+    vram: '1.09 GB',
+    desc: 'Max-quality 4B Ternary PQ2_0 + FWHT (Qwen3.5-4B) — ~21 tok/s on iPhone',
   },
 ];
 
@@ -88,7 +106,7 @@ export function getSavedWebLlmModel(): WebLlmModelId {
       return saved as WebLlmModelId;
     }
   }
-  return 'Qwen3-0.6B-q4f32_1-MLC';
+  return 'bonsai-2-2b-ptq1';
 }
 
 export function saveWebLlmModelSelection(modelId: WebLlmModelId): void {
@@ -355,15 +373,15 @@ function applyLlmDistractorsToQuestions(
 }
 
 // Persist engine singleton on globalThis so Vite HMR updates never drop VRAM state
-const ENGINE_CONFIG_VERSION = 8;
+const ENGINE_CONFIG_VERSION = 9;
 
 type ProgressListener = (text: string, progress: number) => void;
 
 interface GlobalWebLlmState {
-  engine: MLCEngineInterface | null;
+  engine: HachiueEngine | null;
   loadedModelId: string | null;
   loadingModelId: string | null;
-  loadingPromise: Promise<MLCEngineInterface> | null;
+  loadingPromise: Promise<HachiueEngine> | null;
   lastProgressText: string;
   lastProgressRatio: number;
   listeners: Set<ProgressListener>;
@@ -372,18 +390,21 @@ interface GlobalWebLlmState {
 
 const globalState: GlobalWebLlmState = (() => {
   const g = globalThis as unknown as {
-    __WETWARE_WEBLLM__?: GlobalWebLlmState & { worker?: Worker | null };
+    __WETWARE_WEBLLM__?: GlobalWebLlmState & {
+      engine?: { dispose?: () => void; unload?: () => Promise<void> } | null;
+      worker?: Worker | null;
+    };
   };
   if (
     !g.__WETWARE_WEBLLM__ ||
     g.__WETWARE_WEBLLM__.configVersion !== ENGINE_CONFIG_VERSION
   ) {
-    if (g.__WETWARE_WEBLLM__?.worker) {
-      try {
-        g.__WETWARE_WEBLLM__.worker.terminate();
-      } catch {
-        // Ignore worker termination error
-      }
+    try {
+      g.__WETWARE_WEBLLM__?.engine?.dispose?.();
+      void g.__WETWARE_WEBLLM__?.engine?.unload?.();
+      g.__WETWARE_WEBLLM__?.worker?.terminate();
+    } catch {
+      // Ignore prior engine teardown errors
     }
     g.__WETWARE_WEBLLM__ = {
       engine: null,
@@ -429,91 +450,36 @@ export function getLoadedWebLlmModelId(): string | null {
   return globalState.loadedModelId;
 }
 
-export function isQwen3Model(modelId?: string | null): boolean {
-  return Boolean(modelId && modelId.toLowerCase().includes('qwen3'));
-}
-
-const MODEL_CACHE_BASE_URLS: Record<WebLlmModelId, string> = {
-  'Qwen3-0.6B-q4f32_1-MLC':
-    'https://huggingface.co/mlc-ai/Qwen3-0.6B-q4f32_1-MLC/resolve/main/',
-  'Qwen2.5-1.5B-Instruct-q4f32_1-MLC':
-    'https://huggingface.co/mlc-ai/Qwen2.5-1.5B-Instruct-q4f32_1-MLC/resolve/main/',
-  'Qwen3-1.7B-q4f32_1-MLC':
-    'https://huggingface.co/mlc-ai/Qwen3-1.7B-q4f32_1-MLC/resolve/main/',
-  'gemma-2-2b-it-q4f32_1-MLC-1k':
-    'https://huggingface.co/mlc-ai/gemma-2-2b-it-q4f32_1-MLC/resolve/main/',
-  'gemma-4-E2B-it-q4f32_1-MLC':
-    'https://huggingface.co/mlc-ai/gemma-4-E2B-it-q4f32_1-MLC/resolve/main/',
-};
-
 /**
- * Checks which WebGPU models are already stored in the browser's persistent Cache Storage (`webllm/model`).
- * Directly inspects `window.caches` with a single `cache.keys()` pass (<5ms) instead of dynamically
- * importing the 6.15 MB `@mlc-ai/web-llm` bundle or calling `cache.keys()` 10 separate times.
+ * Checks which Bonsai 1 / Bonsai 2 GGUF models are cached in OPFS or IndexedDB (`hachiue`).
+ * Completes in <2ms with zero network requests.
  */
 export async function checkCachedWebLlmModels(): Promise<
   Record<WebLlmModelId, boolean>
 > {
   const result: Record<WebLlmModelId, boolean> = {
-    'Qwen3-0.6B-q4f32_1-MLC': false,
-    'Qwen2.5-1.5B-Instruct-q4f32_1-MLC': false,
-    'Qwen3-1.7B-q4f32_1-MLC': false,
-    'gemma-2-2b-it-q4f32_1-MLC-1k': false,
-    'gemma-4-E2B-it-q4f32_1-MLC': false,
+    'bonsai-1.7b-q1': false,
+    'bonsai-2-2b-ptq1': false,
+    'bonsai-2-2b-pq2': false,
+    'bonsai-4b-q1': false,
+    'bonsai-2-4b-ptq1': false,
+    'bonsai-2-4b-pq2': false,
   };
 
-  if (typeof window === 'undefined' || !('caches' in window)) {
-    return result;
-  }
-
-  try {
-    const cache = await window.caches.open('webllm/model');
-    const requests = await cache.keys();
-    if (requests.length === 0) {
-      return result;
-    }
-    const urlSet = new Set(requests.map((r) => r.url));
-
-    await Promise.all(
-      WEBLLM_MODEL_OPTIONS.map(async (opt) => {
-        try {
-          const baseUrl = MODEL_CACHE_BASE_URLS[opt.id];
-          const manifestUrl = `${baseUrl}tensor-cache.json`;
-          if (!urlSet.has(manifestUrl)) {
-            result[opt.id] = false;
-            return;
-          }
-          const manifestRes = await cache.match(manifestUrl);
-          if (!manifestRes) {
-            result[opt.id] = false;
-            return;
-          }
-          const manifestJson = (await manifestRes.json()) as {
-            records?: Array<{ dataPath?: string }>;
-          };
-          const records = Array.isArray(manifestJson?.records)
-            ? manifestJson.records
-            : [];
-          result[opt.id] =
-            records.length > 0 &&
-            records.every(
-              (rec) =>
-                Boolean(rec.dataPath) &&
-                urlSet.has(new URL(rec.dataPath!, baseUrl).href)
-            );
-        } catch {
-          result[opt.id] = false;
-        }
-      })
-    );
-  } catch {
-    // Ignore if Cache API unavailable
-  }
+  await Promise.all(
+    WEBLLM_MODEL_OPTIONS.map(async (opt) => {
+      try {
+        result[opt.id] = await isModelCached(opt.url);
+      } catch {
+        result[opt.id] = false;
+      }
+    })
+  );
   return result;
 }
 
 /**
- * Explicitly unloads the active WebGPU model from VRAM (`GPUDevice.destroy()`)
+ * Explicitly disposes the active Hachiue WebGPU engine (`GPUDevice.destroy()`)
  * and yields across macrotasks so the mobile GPU driver finishes reclaiming unified memory.
  */
 export async function unloadWebLlmEngine(): Promise<void> {
@@ -521,9 +487,9 @@ export async function unloadWebLlmEngine(): Promise<void> {
 
   if (globalState.engine) {
     try {
-      await globalState.engine.unload();
+      globalState.engine.dispose();
     } catch {
-      // Ignore unload error
+      // Ignore dispose error
     }
     globalState.engine = null;
   }
@@ -531,16 +497,16 @@ export async function unloadWebLlmEngine(): Promise<void> {
   globalState.loadedModelId = null;
 
   if (hadActiveEngine) {
-    // Allow asynchronous GPUDevice.destroy() IPC to complete
-    await new Promise((resolve) => setTimeout(resolve, 400));
+    await new Promise((resolve) => setTimeout(resolve, 250));
   }
 }
 
 /**
- * Purges downloaded model weights from browser Cache Storage (disk) and unloads active VRAM.
+ * Purges downloaded GGUF chunks from OPFS / IndexedDB (`hachiue`) and any legacy CacheStorage buckets.
  */
 export async function purgeWebLlmDiskCache(): Promise<void> {
   await unloadWebLlmEngine();
+  await clearModelCache().catch(() => {});
 
   if (typeof window !== 'undefined' && 'caches' in window) {
     try {
@@ -563,31 +529,24 @@ export async function purgeWebLlmDiskCache(): Promise<void> {
 }
 
 /**
- * Initializes (or reuses) the in-browser WebGPU MLC Engine with a compact 256-token KV cache window.
+ * Initializes (or reuses) the in-browser `hachiue` WebGPU engine for Bonsai 1 (1-bit Q1_0)
+ * and Bonsai 2 (Ternary 1.58-bit PTQ1_0 / PQ2_0 + FWHT + Qwen3.5 Gated DeltaNet) GGUF models.
  */
 export async function initWebLlmEngine(
   modelId: string = DEFAULT_WEBLLM_MODEL,
   onProgress?: (text: string, progress: number) => void
-): Promise<MLCEngineInterface> {
+): Promise<HachiueEngine> {
   if (!isWebGpuSupported()) {
     throw new Error(
       'WebGPU is not available in this browser context (requires Secure Context: localhost or HTTPS).'
     );
   }
 
-  const { CreateMLCEngine, prebuiltAppConfig } = await import(
-    '@mlc-ai/web-llm'
-  );
-  const matchedRecord = prebuiltAppConfig.model_list.find(
-    (m) => m.model_id.toLowerCase() === modelId.toLowerCase()
-  );
-  const resolvedModelId = matchedRecord ? matchedRecord.model_id : modelId;
-
-  // Use a compact 256-token KV cache window (our translation & distractor prompts use <100 tokens total).
-  // This cuts FP32 KV cache allocation by 16x compared to the default 4096 window (~1 GB saved on mobile!).
-  const chatOpts = {
-    context_window_size: 256,
-  };
+  const matchedOption =
+    WEBLLM_MODEL_OPTIONS.find(
+      (m) => m.id.toLowerCase() === modelId.toLowerCase()
+    ) || WEBLLM_MODEL_OPTIONS[1];
+  const resolvedModelId = matchedOption.id;
 
   if (
     globalState.engine &&
@@ -609,11 +568,7 @@ export async function initWebLlmEngine(
 
   const priorLoadPromise = globalState.loadingPromise;
 
-  const notifyProgress = (report: {
-    text: string;
-    progress: number;
-    timeElapsed?: number;
-  }) => {
+  const notifyProgress = (report: { text: string; progress: number }) => {
     globalState.lastProgressText = report.text;
     globalState.lastProgressRatio = report.progress;
     onProgress?.(report.text, report.progress);
@@ -627,7 +582,7 @@ export async function initWebLlmEngine(
   };
 
   globalState.loadingModelId = resolvedModelId;
-  const loadTask = (async (): Promise<MLCEngineInterface> => {
+  const loadTask = (async (): Promise<HachiueEngine> => {
     try {
       if (priorLoadPromise) {
         try {
@@ -637,7 +592,6 @@ export async function initWebLlmEngine(
         }
       }
 
-      // Explicitly unload previous GPU buffers before loading a new model
       if (globalState.engine) {
         notifyProgress({
           text: 'Releasing previous model VRAM...',
@@ -646,14 +600,33 @@ export async function initWebLlmEngine(
         await unloadWebLlmEngine();
       }
 
-      const engine = await CreateMLCEngine(
-        resolvedModelId,
-        {
-          appConfig: prebuiltAppConfig,
-          initProgressCallback: notifyProgress,
+      const engine = await HachiueEngine.create({
+        url: matchedOption.url,
+        maxSeqLen: 512,
+        onProgress: (p) => {
+          if (p.phase === 'weights' && p.totalBytes) {
+            const ratio =
+              p.loadedBytes !== undefined ? p.loadedBytes / p.totalBytes : 0;
+            const mb = ((p.loadedBytes ?? 0) / 1048576).toFixed(0);
+            const totMb = (p.totalBytes / 1048576).toFixed(0);
+            notifyProgress({
+              text: `${
+                p.cached ? 'Loading cached GGUF' : 'Streaming 16MiB Range'
+              }: ${mb} / ${totMb} MiB`,
+              progress: ratio,
+            });
+          } else if (p.message) {
+            notifyProgress({
+              text: p.message,
+              progress: p.phase === 'ready' ? 1 : globalState.lastProgressRatio,
+            });
+          }
         },
-        chatOpts
-      );
+        onDeviceLost: () => {
+          globalState.engine = null;
+          globalState.loadedModelId = null;
+        },
+      });
 
       globalState.engine = engine;
       globalState.loadedModelId = resolvedModelId;
@@ -1006,9 +979,18 @@ export async function fetchDevToPassage(): Promise<{
   };
 }
 
+let inferenceChain: Promise<unknown> = Promise.resolve();
+let activeTranslationAbort: AbortController | null = null;
+
+function runSerializedInference<T>(task: () => Promise<T>): Promise<T> {
+  const next = inferenceChain.then(task, task);
+  inferenceChain = next.catch(() => {});
+  return next;
+}
+
 /**
  * Unified 3-Tier On-Device LLM Pipeline (Section 6.3):
- * 1. 'webllm': In-browser WebGPU execution via `@mlc-ai/web-llm`
+ * 1. 'webllm': In-browser WebGPU execution via `hachiue` (Bonsai 1 & Bonsai 2 GGUF)
  * 2. 'ollama': Local Ollama / OpenAI-compatible HTTP endpoint
  * 3. 'rule_based': Instant heuristic chunker & Cloze quiz generator fallback
  */
@@ -1043,7 +1025,7 @@ export async function processPassageWithOptionalLlm(params: {
   const distractorPrompt = buildDistractorPrompt(targetWords);
   const distractorMessages = buildDistractorChatMessages(targetWords);
 
-  // Tier A: In-Browser WebGPU (@mlc-ai/web-llm) — Ultra-lightweight distractor word generation
+  // Tier A: In-Browser WebGPU (`hachiue` Bonsai 1 & 2) — Ultra-lightweight distractor word generation
   if (params.provider === 'webllm') {
     try {
       const modelId = params.webLlmModel || DEFAULT_WEBLLM_MODEL;
@@ -1056,16 +1038,14 @@ export async function processPassageWithOptionalLlm(params: {
         `Generating Cloze distractors on WebGPU (${modelId})...`
       );
 
-      const reply = await engine.chat.completions.create({
-        messages: distractorMessages,
-        temperature: 0.3,
-        max_tokens: 72,
-        ...(isQwen3Model(modelId)
-          ? { extra_body: { enable_thinking: false } }
-          : {}),
-      });
+      const reply = await runSerializedInference(() =>
+        engine.generate(distractorMessages, {
+          temperature: 0,
+          maxNewTokens: 64,
+        })
+      );
 
-      const content = reply.choices?.[0]?.message?.content || '';
+      const content = reply.text || '';
       const { updatedQuestions, appliedCount } = applyLlmDistractorsToQuestions(
         basePassage.questions,
         content
@@ -1641,12 +1621,19 @@ export async function translateSelection(params: {
 
   let webLlmDiagError: string | null = null;
 
-  // 2. If WebLLM is selected (or already loaded in VRAM), run on-device translation
+  // 2. If WebGPU (`hachiue`) is selected (or already loaded in VRAM), run on-device translation
   if (
     (params.provider === 'webllm' && isWebLlmReady(params.webLlmModel)) ||
     isWebLlmReady()
   ) {
     try {
+      // Cancel any previous in-flight translation if the user tapped a new word rapidly
+      if (activeTranslationAbort) {
+        activeTranslationAbort.abort();
+      }
+      const abortCtrl = new AbortController();
+      activeTranslationAbort = abortCtrl;
+
       const modelId =
         getLoadedWebLlmModelId() || params.webLlmModel || DEFAULT_WEBLLM_MODEL;
       const engine = await initWebLlmEngine(modelId);
@@ -1654,15 +1641,27 @@ export async function translateSelection(params: {
         cleanText,
         params.targetLang
       );
-      const reply = await engine.chat.completions.create({
-        messages: chatMessages,
-        temperature: 0.1,
-        max_tokens: 32,
-        ...(isQwen3Model(modelId)
-          ? { extra_body: { enable_thinking: false } }
-          : {}),
-      });
-      const rawContent = reply.choices?.[0]?.message?.content || '';
+
+      let streamedText = '';
+      const reply = await runSerializedInference(() =>
+        engine.generate(chatMessages, {
+          temperature: 0,
+          maxNewTokens: 28,
+          signal: abortCtrl.signal,
+          onToken: (_id, delta) => {
+            streamedText += delta;
+            // Stop immediately once the first non-empty line finishes
+            if (streamedText.trim().length > 0 && delta.includes('\n')) {
+              abortCtrl.abort();
+            }
+          },
+        })
+      );
+      if (activeTranslationAbort === abortCtrl) {
+        activeTranslationAbort = null;
+      }
+
+      const rawContent = reply.text || streamedText || '';
       const out = extractCleanTranslationLine(rawContent);
 
       if (isValidTargetLanguageTranslation(out, cleanText, params.targetLang)) {

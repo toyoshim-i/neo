@@ -283,7 +283,7 @@ export function SystemSettingsModal({
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
                 {(
                   [
-                    { id: 'webllm', label: 'WEBGPU (BONSAI/GEMMA)' },
+                    { id: 'webllm', label: 'HACHIUE (BONSAI 1/2)' },
                     { id: 'chrome_ai', label: 'CHROME AI (NANO)' },
                     { id: 'ollama', label: 'OLLAMA API' },
                     { id: 'rule_based', label: 'RULE-BASED' },
@@ -382,7 +382,7 @@ export function SystemSettingsModal({
                 <div className="p-2.5 bg-[#0D0618] border border-[#FFE600]/40 space-y-2.5">
                   <div className="flex items-center justify-between text-[10px]">
                     <span className="text-[#6C7A89]">
-                      SELECT WEBGPU MODEL (256-CTX COMPACT VRAM)
+                      🪴 HACHIUE // WEBGPU BONSAI 1 &amp; 2 GGUF
                     </span>
                     <span className="text-[#00F5D4] font-bold">
                       {isWebGpuSupported() ? 'WEBGPU OK' : 'NO WEBGPU'}
