@@ -6,14 +6,12 @@ import { ChamferedPanel } from '../layout/ChamferedPanel';
 interface TitleScreenProps {
   profile: UserProfile;
   onEnterGuided: () => void;
-  onRecalibrate: () => void;
   onEnterFreeplay: () => void;
 }
 
 export function TitleScreen({
   profile,
   onEnterGuided,
-  onRecalibrate,
   onEnterFreeplay,
 }: TitleScreenProps) {
   return (
@@ -46,7 +44,7 @@ export function TitleScreen({
               </span>
             ) : (
               <span className="text-[#FFE600] font-bold">
-                STARTS WITH CALIBRATION
+                1ST RUN GENERATES GHOST
               </span>
             )
           }
@@ -118,23 +116,9 @@ export function TitleScreen({
                 className="cyber-btn flex-1 py-3.5 px-5 bg-[#00F5D4] text-[#0D0618] font-bold text-sm tracking-wider flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(0,245,212,0.3)] hover:brightness-110"
               >
                 <Compass className="w-4 h-4" />
-                <span>
-                  {profile.baselineWpm
-                    ? 'ENTER NEURAL COACH'
-                    : 'START BASELINE CALIBRATION'}
-                </span>
+                <span>ENTER NEURAL COACH</span>
                 <ChevronRight className="w-4 h-4" />
               </button>
-
-              {profile.baselineWpm && (
-                <button
-                  type="button"
-                  onClick={onRecalibrate}
-                  className="cyber-btn py-3.5 px-3.5 bg-[#0D0618] border border-[#6C7A89]/50 text-[#6C7A89] hover:border-[#00F5D4] hover:text-[#00F5D4] font-terminal text-xs"
-                >
-                  RECALIBRATE
-                </button>
-              )}
             </div>
           </div>
         </ChamferedPanel>

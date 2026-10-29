@@ -4,6 +4,7 @@ import { soundEngine } from '../../lib/soundEngine';
 interface GhostRacingBarProps {
   userProgress: number;       // 0 to 100 (Player click cursor)
   ghostProgress: number;      // 0 to 100 (Target WPM Ghost cursor)
+  hasGhost: boolean;          // False on the initial run before a Ghost is generated
   targetWpm: number;
   totalWords: number;
   bestEffectiveWpm: number;   // e.g. 280
@@ -14,6 +15,7 @@ interface GhostRacingBarProps {
 export const GhostRacingBar: React.FC<GhostRacingBarProps> = ({
   userProgress,
   ghostProgress,
+  hasGhost,
   targetWpm,
   totalWords,
   bestEffectiveWpm,
@@ -50,13 +52,15 @@ export const GhostRacingBar: React.FC<GhostRacingBarProps> = ({
   useEffect(() => {
     if (userProgress < 8 || elapsedMs < 1000) return;
 
-    const nowAheadGhost = userProgress > ghostProgress;
-    if (nowAheadGhost && !wasAheadOfGhost.current && ghostProgress > 5) {
-      soundEngine.playOvertakeSpark();
-      setOvertakeFlash('GHOST');
-      window.setTimeout(() => setOvertakeFlash(null), 650);
+    if (hasGhost) {
+      const nowAheadGhost = userProgress > ghostProgress;
+      if (nowAheadGhost && !wasAheadOfGhost.current && ghostProgress > 5) {
+        soundEngine.playOvertakeSpark();
+        setOvertakeFlash('GHOST');
+        window.setTimeout(() => setOvertakeFlash(null), 650);
+      }
+      wasAheadOfGhost.current = nowAheadGhost;
     }
-    wasAheadOfGhost.current = nowAheadGhost;
 
     const nowAheadBest = userProgress > bestProgress;
     if (nowAheadBest && !wasAheadOfBest.current && bestProgress > 5) {
@@ -65,7 +69,7 @@ export const GhostRacingBar: React.FC<GhostRacingBarProps> = ({
       window.setTimeout(() => setOvertakeFlash(null), 650);
     }
     wasAheadOfBest.current = nowAheadBest;
-  }, [userProgress, ghostProgress, bestProgress, elapsedMs]);
+  }, [userProgress, ghostProgress, hasGhost, bestProgress, elapsedMs]);
 
   return (
     <div
@@ -94,20 +98,22 @@ export const GhostRacingBar: React.FC<GhostRacingBarProps> = ({
       </div>
 
       {/* Track 2: TARGET WPM GHOST PACER (YELLOW) */}
-      <div className="flex items-center gap-2">
-        <span className="w-24 text-[#FFE600] shrink-0">
-          GHOST ({targetWpm})
-        </span>
-        <div className="flex-1 h-1 bg-[#0D0618] overflow-hidden">
-          <div
-            className="h-full bg-[#FFE600]/85 transition-all duration-100"
-            style={{ width: `${ghostProgress}%` }}
-          />
+      {hasGhost && (
+        <div className="flex items-center gap-2">
+          <span className="w-24 text-[#FFE600] shrink-0">
+            GHOST ({targetWpm})
+          </span>
+          <div className="flex-1 h-1 bg-[#0D0618] overflow-hidden">
+            <div
+              className="h-full bg-[#FFE600]/85 transition-all duration-100"
+              style={{ width: `${ghostProgress}%` }}
+            />
+          </div>
+          <span className="w-9 text-right text-[#FFE600]">
+            {Math.round(ghostProgress)}%
+          </span>
         </div>
-        <span className="w-9 text-right text-[#FFE600]">
-          {Math.round(ghostProgress)}%
-        </span>
-      </div>
+      )}
 
       {/* Track 3: SELF BEST OR NATIVE AVG (MAGENTA) */}
       <div className="flex items-center gap-2">

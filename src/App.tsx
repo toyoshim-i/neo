@@ -9,14 +9,13 @@ import { SessionHistoryModal } from './components/modals/SessionHistoryModal';
 import { SystemSettingsModal } from './components/modals/SystemSettingsModal';
 import { AchievementsModal } from './components/modals/AchievementsModal';
 import { TitleScreen } from './components/screens/TitleScreen';
-import { CalibrationScreen } from './components/screens/CalibrationScreen';
 import { HomeScreen } from './components/screens/HomeScreen';
 import { PreviewScreen } from './components/screens/PreviewScreen';
 import { ReadingScreen } from './components/screens/ReadingScreen';
 import { QuizScreen } from './components/screens/QuizScreen';
 import { ResultScreen } from './components/screens/ResultScreen';
 import { soundEngine } from './lib/soundEngine';
-import { PRESET_PASSAGES, CALIBRATION_PASSAGE } from './data/presetPassages';
+import { PRESET_PASSAGES } from './data/presetPassages';
 import {
   TrainingMode,
   TrainingPassage,
@@ -35,12 +34,10 @@ import {
   db,
   DEFAULT_PROFILE,
   INITIAL_DEFAULT_WPM,
-  QUIZ_PASS_THRESHOLD,
   ACHIEVEMENT_CATALOG,
   getSavedTargetWpm,
   saveTargetWpmPreference,
   getOrInitProfile,
-  saveCalibrationBaseline,
   recordSessionAndUpdateProfile,
   exportDatabaseJson,
 } from './lib/db';
@@ -87,13 +84,6 @@ export function App() {
   // Navigation & Hierarchy State
   const [screen, setScreen] = useState<ScreenState>('title');
   const [appMode, setAppMode] = useState<AppExperienceMode>('guided');
-  const [isCalibratingSession, setIsCalibratingSession] =
-    useState<boolean>(false);
-  const [calibrationStartMs, setCalibrationStartMs] = useState<number | null>(
-    null
-  );
-  const [measuredCalibrationRawWpm, setMeasuredCalibrationRawWpm] =
-    useState<number>(150);
   const [showAchievementsModal, setShowAchievementsModal] =
     useState<boolean>(false);
   const [showPassageModal, setShowPassageModal] = useState<boolean>(false);
@@ -198,8 +188,6 @@ export function App() {
   const [newlyUnlockedAchievements, setNewlyUnlockedAchievements] = useState<
     AchievementId[]
   >([]);
-  const [calibrationCompletedBanner, setCalibrationCompletedBanner] =
-    useState<number | null>(null);
 
   // Persist user-selected target WPM as the default for subsequent sessions
   useEffect(() => {
@@ -348,9 +336,9 @@ export function App() {
     ...customPassages,
     ...PRESET_PASSAGES,
   ];
-  const selectedPassage = isCalibratingSession
-    ? CALIBRATION_PASSAGE
-    : allPassages.find((p) => p.id === selectedPassageId) || PRESET_PASSAGES[0];
+  const selectedPassage =
+    allPassages.find((p) => p.id === selectedPassageId) || PRESET_PASSAGES[0];
+  const hasGhost = Boolean(profile.baselineWpm);
 
   // Compute Weakness-Driven 6-Engine ESL Coach Prescription
   const latestMetricsForCoach =
@@ -405,50 +393,6 @@ export function App() {
     setLexiconPopup(null);
     setScreen('preview');
   };
-
-  // Start Self-Paced Baseline Calibration
-  const startCalibrationProbe = () => {
-    soundEngine.playUiClick();
-    setIsCalibratingSession(true);
-    setCalibrationCompletedBanner(null);
-    setActiveChunkIndex(0);
-    setCalibrationStartMs(null);
-    setLexiconPopup(null);
-    setScreen('calibration');
-  };
-
-  const handleAdvanceCalibrationChunk = useCallback(() => {
-    const now = Date.now();
-    const startMs = calibrationStartMs ?? now;
-    if (calibrationStartMs === null) {
-      setCalibrationStartMs(now);
-    }
-
-    if (activeChunkIndex < CALIBRATION_PASSAGE.chunks.length - 1) {
-      const nextIdx = activeChunkIndex + 1;
-      setActiveChunkIndex(nextIdx);
-      soundEngine.playChunkTick(
-        CALIBRATION_PASSAGE.discourseMarkerIndices.includes(nextIdx)
-      );
-    } else {
-      const elapsedMinutes = Math.max(0.08, (now - startMs) / 60000);
-      const rawMeasured = Math.max(
-        80,
-        Math.min(550, Math.round(CALIBRATION_PASSAGE.wordCount / elapsedMinutes))
-      );
-      setMeasuredCalibrationRawWpm(rawMeasured);
-      setTargetWpm(rawMeasured);
-      soundEngine.playPassTransition(3);
-      setActiveQuizQuestions(shuffleQuizQuestions(CALIBRATION_PASSAGE.questions));
-      setQuizIndex(0);
-      setSelectedOption(null);
-      setCorrectCount(0);
-      setOperatorState('observing');
-      setLastResponseSec(null);
-      questionStartTimeRef.current = Date.now();
-      setScreen('quiz');
-    }
-  }, [activeChunkIndex, calibrationStartMs]);
 
   // Effective WPM during reading
   const activeWpm = targetWpm;
@@ -668,30 +612,6 @@ export function App() {
     ) => {
       const syncRate =
         totalQuestions > 0 ? finalCorrect / totalQuestions : 1;
-      const quizPassed = syncRate >= QUIZ_PASS_THRESHOLD;
-
-      if (isCalibratingSession) {
-        const calibratedWpm = quizPassed
-          ? measuredCalibrationRawWpm
-          : Math.max(100, Math.round(measuredCalibrationRawWpm * 0.85));
-        try {
-          const { profile: updatedProf, newlyUnlocked } =
-            await saveCalibrationBaseline(calibratedWpm);
-          setProfile(updatedProf);
-          setNewlyUnlockedAchievements(newlyUnlocked);
-        } catch {
-          // Ignore DB error in private browsing
-        }
-        setIsCalibratingSession(false);
-        setTargetWpm(calibratedWpm);
-        setSelectedMode('chunk_pacer');
-        setFadeOutPassed(false);
-        setCalibrationCompletedBanner(calibratedWpm);
-        soundEngine.playRecordBreakerFanfare();
-        setScreen('home');
-        setShowPassageModal(true);
-        return;
-      }
 
       const avgWordsPerChunk =
         selectedPassage.chunks.length > 0
@@ -791,7 +711,7 @@ export function App() {
       }
 
       const baseReferenceWpm =
-        selectedMode === 'tachistoscope'
+        selectedMode === 'tachistoscope' || !hasGhost
           ? measuredRawWpm
           : Math.round((targetWpm + measuredRawWpm) / 2);
       const { nextWpm } = computeNextTargetWpm(
@@ -824,8 +744,7 @@ export function App() {
     },
     [
       appMode,
-      isCalibratingSession,
-      measuredCalibrationRawWpm,
+      hasGhost,
       targetWpm,
       selectedPassage,
       activeChunkIndex,
@@ -841,6 +760,7 @@ export function App() {
     if (
       screen !== 'reading' ||
       !isPlaying ||
+      !hasGhost ||
       selectedMode === 'tachistoscope'
     ) {
       return;
@@ -867,6 +787,7 @@ export function App() {
   }, [
     screen,
     isPlaying,
+    hasGhost,
     ghostChunkIndex,
     activeWpm,
     selectedPassage,
@@ -933,19 +854,6 @@ export function App() {
     activeChunkIndex,
     handleAdvanceReadingChunk,
   ]);
-
-  // Keyboard shortcuts during Self-Paced Calibration
-  useEffect(() => {
-    if (screen !== 'calibration') return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.code === 'Space' || e.code === 'ArrowRight' || e.code === 'Enter') {
-        e.preventDefault();
-        handleAdvanceCalibrationChunk();
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [screen, handleAdvanceCalibrationChunk]);
 
   // Handle Quiz Option Selection
   const handleSelectQuizOption = useCallback(
@@ -1164,8 +1072,6 @@ export function App() {
   const stepLabel =
     screen === 'title'
       ? 'MODE SELECT'
-      : screen === 'calibration'
-      ? 'NEURAL CALIBRATION'
       : screen === 'home'
       ? appMode === 'guided'
         ? 'NEURAL COACH'
@@ -1213,7 +1119,6 @@ export function App() {
         onOpenSettings={() => setShowSettingsModal(true)}
         onGoHome={() => {
           setIsPlaying(false);
-          setIsCalibratingSession(false);
           setScreen('title');
         }}
       />
@@ -1223,35 +1128,16 @@ export function App() {
           profile={profile}
           onEnterGuided={() => {
             setAppMode('guided');
-            if (!profile.baselineWpm) {
-              startCalibrationProbe();
-            } else {
-              applyGuidedRecommendationForPassage(
-                selectedPassageId,
-                profile,
-                targetWpm
-              );
-              setScreen('home');
-            }
-          }}
-          onRecalibrate={() => {
-            setAppMode('guided');
-            startCalibrationProbe();
+            applyGuidedRecommendationForPassage(
+              selectedPassageId,
+              profile,
+              targetWpm
+            );
+            setScreen('home');
           }}
           onEnterFreeplay={() => {
             setAppMode('freeplay');
             setScreen('home');
-          }}
-        />
-      )}
-
-      {screen === 'calibration' && (
-        <CalibrationScreen
-          activeChunkIndex={activeChunkIndex}
-          onAdvanceChunk={handleAdvanceCalibrationChunk}
-          onCancel={() => {
-            setIsCalibratingSession(false);
-            setScreen('title');
           }}
         />
       )}
@@ -1268,8 +1154,6 @@ export function App() {
           selectedPassage={selectedPassage}
           estimatedSeconds={estimatedSeconds}
           bgQuizStatus={bgQuizStatus}
-          calibrationCompletedBanner={calibrationCompletedBanner}
-          setCalibrationCompletedBanner={setCalibrationCompletedBanner}
           onBackToProtocols={() => setScreen('title')}
           onToggleAppMode={() => {
             const nextMode = appMode === 'guided' ? 'freeplay' : 'guided';
@@ -1309,6 +1193,7 @@ export function App() {
           selectedMode={selectedMode}
           selectedPassage={selectedPassage}
           profile={profile}
+          hasGhost={hasGhost}
           targetWpm={targetWpm}
           setTargetWpm={setTargetWpm}
           activeWpm={activeWpm}

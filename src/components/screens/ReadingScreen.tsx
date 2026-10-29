@@ -116,6 +116,7 @@ interface ReadingScreenProps {
   selectedMode: TrainingMode;
   selectedPassage: TrainingPassage;
   profile: UserProfile;
+  hasGhost: boolean;
   targetWpm: number;
   setTargetWpm: (updater: (prev: number) => number) => void;
   activeWpm: number;
@@ -287,6 +288,7 @@ export function ReadingScreen({
   selectedMode,
   selectedPassage,
   profile,
+  hasGhost,
   targetWpm,
   setTargetWpm,
   activeWpm,
@@ -306,6 +308,9 @@ export function ReadingScreen({
 }: ReadingScreenProps) {
   const activeSaccadeRowRef = useRef<HTMLDivElement | null>(null);
   const chunkDelta = activeChunkIndex - ghostChunkIndex;
+  const hasCustomGhostWeights = Boolean(
+    profile.passageRecords?.[selectedPassage.id]?.bestChunkWeights?.length
+  );
 
   useEffect(() => {
     if (selectedMode === 'saccade_rail' && activeSaccadeRowRef.current) {
@@ -341,39 +346,45 @@ export function ReadingScreen({
           </div>
 
           <div className="flex items-center gap-3">
-            <div className="flex items-center gap-1">
-              <button
-                type="button"
-                onClick={() => setTargetWpm((w) => Math.max(60, w - 10))}
-                className="px-1.5 py-0.5 bg-[#0D0618] border border-[#00F5D4]/40 text-[#00F5D4] cursor-pointer hover:bg-[#00F5D4]/15"
-              >
-                -10
-              </button>
-              <button
-                type="button"
-                onClick={() => setTargetWpm((w) => Math.max(60, w - 1))}
-                className="px-1.5 py-0.5 bg-[#0D0618] border border-[#6C7A89]/40 text-[#F2F5F8] cursor-pointer hover:border-[#00F5D4]"
-              >
-                -1
-              </button>
-              <span className="text-[#00F5D4] font-bold min-w-[72px] text-center">
-                {activeWpm} WPM
+            {hasGhost || selectedMode === 'tachistoscope' ? (
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setTargetWpm((w) => Math.max(60, w - 10))}
+                  className="px-1.5 py-0.5 bg-[#0D0618] border border-[#00F5D4]/40 text-[#00F5D4] cursor-pointer hover:bg-[#00F5D4]/15"
+                >
+                  -10
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTargetWpm((w) => Math.max(60, w - 1))}
+                  className="px-1.5 py-0.5 bg-[#0D0618] border border-[#6C7A89]/40 text-[#F2F5F8] cursor-pointer hover:border-[#00F5D4]"
+                >
+                  -1
+                </button>
+                <span className="text-[#00F5D4] font-bold min-w-[72px] text-center">
+                  {activeWpm} WPM
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setTargetWpm((w) => Math.min(900, w + 1))}
+                  className="px-1.5 py-0.5 bg-[#0D0618] border border-[#6C7A89]/40 text-[#F2F5F8] cursor-pointer hover:border-[#00F5D4]"
+                >
+                  +1
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTargetWpm((w) => Math.min(900, w + 10))}
+                  className="px-1.5 py-0.5 bg-[#0D0618] border border-[#00F5D4]/40 text-[#00F5D4] cursor-pointer hover:bg-[#00F5D4]/15"
+                >
+                  +10
+                </button>
+              </div>
+            ) : (
+              <span className="px-2 py-0.5 bg-[#0D0618] border border-[#FFE600]/50 text-[#FFE600] text-[10px] font-bold">
+                1ST RUN // RECORDING GHOST
               </span>
-              <button
-                type="button"
-                onClick={() => setTargetWpm((w) => Math.min(900, w + 1))}
-                className="px-1.5 py-0.5 bg-[#0D0618] border border-[#6C7A89]/40 text-[#F2F5F8] cursor-pointer hover:border-[#00F5D4]"
-              >
-                +1
-              </button>
-              <button
-                type="button"
-                onClick={() => setTargetWpm((w) => Math.min(900, w + 10))}
-                className="px-1.5 py-0.5 bg-[#0D0618] border border-[#00F5D4]/40 text-[#00F5D4] cursor-pointer hover:bg-[#00F5D4]/15"
-              >
-                +10
-              </button>
-            </div>
+            )}
 
             {selectedMode !== 'tachistoscope' && (
               <button
@@ -409,6 +420,7 @@ export function ReadingScreen({
             ghostProgress={
               ((ghostChunkIndex + 1) / selectedPassage.chunks.length) * 100
             }
+            hasGhost={hasGhost}
             targetWpm={activeWpm}
             totalWords={selectedPassage.wordCount}
             bestEffectiveWpm={profile.bestEffectiveWpm}
@@ -438,26 +450,35 @@ export function ReadingScreen({
               <span className="text-[#00F5D4] font-bold">
                 ■ YOU ({activeChunkIndex + 1}/{selectedPassage.chunks.length})
               </span>
-              <span className="text-[#FFE600] font-bold">
-                ▫ GHOST ({ghostChunkIndex + 1}/{selectedPassage.chunks.length} @{' '}
-                {activeWpm} WPM)
-              </span>
+              {hasGhost ? (
+                <span className="text-[#FFE600] font-bold">
+                  ▫ {hasCustomGhostWeights ? 'PB GHOST' : 'GHOST'} (
+                  {ghostChunkIndex + 1}/{selectedPassage.chunks.length} @{' '}
+                  {activeWpm} WPM)
+                </span>
+              ) : (
+                <span className="text-[#FFE600] font-bold">
+                  ◌ NO GHOST YET (READ AT YOUR OWN PACE TO GENERATE GHOST)
+                </span>
+              )}
             </div>
-            <span
-              className={`px-2 py-0.5 border font-bold ${
-                chunkDelta > 0
-                  ? 'border-[#00F5D4]/60 bg-[#00F5D4]/15 text-[#00F5D4]'
+            {hasGhost && (
+              <span
+                className={`px-2 py-0.5 border font-bold ${
+                  chunkDelta > 0
+                    ? 'border-[#00F5D4]/60 bg-[#00F5D4]/15 text-[#00F5D4]'
+                    : chunkDelta === 0
+                    ? 'border-[#FFE600]/60 bg-[#FFE600]/15 text-[#FFE600]'
+                    : 'border-[#FF1E7A]/60 bg-[#FF1E7A]/15 text-[#FF1E7A]'
+                }`}
+              >
+                {chunkDelta > 0
+                  ? `▲ +${chunkDelta} AHEAD OF GHOST`
                   : chunkDelta === 0
-                  ? 'border-[#FFE600]/60 bg-[#FFE600]/15 text-[#FFE600]'
-                  : 'border-[#FF1E7A]/60 bg-[#FF1E7A]/15 text-[#FF1E7A]'
-              }`}
-            >
-              {chunkDelta > 0
-                ? `▲ +${chunkDelta} AHEAD OF GHOST`
-                : chunkDelta === 0
-                ? '● NECK & NECK WITH GHOST'
-                : `▼ ${chunkDelta} BEHIND GHOST`}
-            </span>
+                  ? '● NECK & NECK WITH GHOST'
+                  : `▼ ${chunkDelta} BEHIND GHOST`}
+              </span>
+            )}
           </div>
 
           {selectedMode === 'rsvp' ? (
@@ -545,7 +566,7 @@ export function ReadingScreen({
                 {selectedPassage.chunks.map((chunk, idx) => {
                   const colIdx = idx % 3;
                   const isActive = idx === activeChunkIndex;
-                  const isGhost = idx === ghostChunkIndex;
+                  const isGhost = hasGhost && idx === ghostChunkIndex;
                   const isPassed = idx < activeChunkIndex;
                   const isCurrentCycle =
                     Math.floor(idx / 3) === Math.floor(activeChunkIndex / 3);
@@ -659,7 +680,7 @@ export function ReadingScreen({
               <div className="pretty-text leading-[2.2] text-lg sm:text-xl font-medium select-none">
                 {selectedPassage.chunks.map((chunk, idx) => {
                   const isActive = idx === activeChunkIndex;
-                  const isGhost = idx === ghostChunkIndex;
+                  const isGhost = hasGhost && idx === ghostChunkIndex;
                   const isPassed = idx < activeChunkIndex;
                   const isMarker =
                     selectedPassage.discourseMarkerIndices.includes(idx);

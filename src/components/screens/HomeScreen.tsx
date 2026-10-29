@@ -4,7 +4,6 @@ import {
   ChevronRight,
   Eye,
   Loader2,
-  X,
   Zap,
 } from 'lucide-react';
 import { CoachPrescription } from '../../lib/metrics';
@@ -32,8 +31,6 @@ interface HomeScreenProps {
     state: 'running' | 'ready' | 'fallback';
     detail?: string;
   } | null;
-  calibrationCompletedBanner: number | null;
-  setCalibrationCompletedBanner: (val: number | null) => void;
   onBackToProtocols: () => void;
   onToggleAppMode: () => void;
   onOpenPreview: () => void;
@@ -52,8 +49,6 @@ export function HomeScreen({
   selectedPassage,
   estimatedSeconds,
   bgQuizStatus,
-  calibrationCompletedBanner,
-  setCalibrationCompletedBanner,
   onBackToProtocols,
   onToggleAppMode,
   onOpenPreview,
@@ -110,24 +105,18 @@ export function HomeScreen({
         </div>
       </div>
 
-      {calibrationCompletedBanner !== null && (
-        <div className="p-3.5 bg-[#00F5D4]/15 border-2 border-[#00F5D4] font-terminal text-xs flex items-center justify-between gap-3">
+      {!profile.baselineWpm && (
+        <div className="p-3 bg-[#180B29] border border-[#FFE600]/60 font-terminal text-xs flex items-center justify-between gap-3">
           <div>
-            <div className="text-[#00F5D4] font-bold">
-              ★ BASELINE CALIBRATION COMPLETE: {calibrationCompletedBanner} WPM
+            <div className="text-[#FFE600] font-bold">
+              ◌ INITIAL RUN // NO GHOST YET
             </div>
-            <div className="text-[#F2F5F8] text-[11px] mt-0.5">
-              Your initial training velocity has been locked in. Select any
-              passage or start Stage 1 below!
+            <div className="text-[#F2F5F8]/90 text-[11px] mt-0.5">
+              Read your first passage at a natural, comfortable pace. Completing
+              it once automatically records your baseline WPM and generates your
+              Ghost pacemaker.
             </div>
           </div>
-          <button
-            type="button"
-            onClick={() => setCalibrationCompletedBanner(null)}
-            className="text-[#00F5D4] hover:text-[#F2F5F8] cursor-pointer"
-          >
-            <X className="w-4 h-4" />
-          </button>
         </div>
       )}
 

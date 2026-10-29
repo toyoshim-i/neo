@@ -19,9 +19,9 @@ export const ACHIEVEMENT_CATALOG: readonly AchievementDefinition[] = [
   {
     id: 'NEURAL_CALIBRATED',
     title: 'NEURAL CALIBRATED',
-    subtitle: 'Baseline Established',
+    subtitle: 'First Ghost Generated',
     description:
-      'Complete the self-paced baseline calibration to measure your natural reading velocity.',
+      'Complete your first reading run to measure your natural pace and generate your Ghost pacemaker.',
     badgeCode: 'CAL-01',
   },
   {
@@ -329,34 +329,6 @@ export async function getOrInitProfile(): Promise<UserProfile> {
   return DEFAULT_PROFILE;
 }
 
-export async function saveCalibrationBaseline(
-  baselineWpm: number
-): Promise<{
-  profile: UserProfile;
-  newlyUnlocked: AchievementId[];
-}> {
-  const clamped = Math.max(80, Math.min(600, Math.round(baselineWpm)));
-  const profile = await getOrInitProfile();
-  const unlocked = new Set<AchievementId>(profile.unlockedAchievements || []);
-  const newlyUnlocked: AchievementId[] = [];
-
-  if (!unlocked.has('NEURAL_CALIBRATED')) {
-    unlocked.add('NEURAL_CALIBRATED');
-    newlyUnlocked.push('NEURAL_CALIBRATED');
-  }
-
-  const updated: UserProfile = {
-    ...profile,
-    baselineWpm: clamped,
-    currentTargetWpm: clamped,
-    unlockedAchievements: Array.from(unlocked),
-  };
-
-  saveTargetWpmPreference(clamped);
-  await db.profiles.put(updated);
-  return { profile: updated, newlyUnlocked };
-}
-
 export async function recordSessionAndUpdateProfile(
   session: SessionLog,
   wordsRead: number,
@@ -376,7 +348,6 @@ export async function recordSessionAndUpdateProfile(
   const today = new Date().toISOString().slice(0, 10);
   const quizPassed = session.syncRate >= QUIZ_PASS_THRESHOLD;
 
-  const isCalibration = session.passageId === 'calibration-baseline-probe';
   const records: Record<string, PassageProgress> = {
     ...(profile.passageRecords || {}),
   };
@@ -394,41 +365,35 @@ export async function recordSessionAndUpdateProfile(
   const wasFirstAttemptOnPassage = prevRecord.attempts === 0;
   const previousPassageBest = prevRecord.bestEffectiveWpm;
   const isNewPassageBest =
-    !isCalibration &&
-    quizPassed &&
-    session.effectiveWpm > prevRecord.bestEffectiveWpm;
+    quizPassed && session.effectiveWpm > prevRecord.bestEffectiveWpm;
   const isNewOverallBest =
-    !isCalibration &&
-    quizPassed &&
-    session.effectiveWpm > profile.bestEffectiveWpm;
+    quizPassed && session.effectiveWpm > profile.bestEffectiveWpm;
 
-  const nextStageCompleted: 0 | 1 | 2 | 3 = !isCalibration && quizPassed
+  const nextStageCompleted: 0 | 1 | 2 | 3 = quizPassed
     ? (Math.min(3, prevRecord.stageCompleted + 1) as 0 | 1 | 2 | 3)
     : prevRecord.stageCompleted;
 
   const updatedPassageRecord: PassageProgress = {
     passageId: session.passageId,
-    bestEffectiveWpm:
-      !isCalibration && quizPassed
-        ? Math.max(prevRecord.bestEffectiveWpm, session.effectiveWpm)
-        : prevRecord.bestEffectiveWpm,
-    bestRawWpm:
-      !isCalibration && quizPassed
-        ? Math.max(prevRecord.bestRawWpm, session.rawWpm)
-        : prevRecord.bestRawWpm,
+    bestEffectiveWpm: quizPassed
+      ? Math.max(prevRecord.bestEffectiveWpm, session.effectiveWpm)
+      : prevRecord.bestEffectiveWpm,
+    bestRawWpm: quizPassed
+      ? Math.max(prevRecord.bestRawWpm, session.rawWpm)
+      : prevRecord.bestRawWpm,
     lastTargetWpm: selectedTargetWpm,
     stageCompleted: nextStageCompleted,
     attempts: prevRecord.attempts + 1,
     updatedAt: Date.now(),
     bestChunkWeights:
-      isNewPassageBest && candidateGhostWeights && candidateGhostWeights.length > 0
+      (isNewPassageBest || !prevRecord.bestChunkWeights) &&
+      candidateGhostWeights &&
+      candidateGhostWeights.length > 0
         ? candidateGhostWeights
         : prevRecord.bestChunkWeights,
   };
 
-  if (!isCalibration) {
-    records[session.passageId] = updatedPassageRecord;
-  }
+  records[session.passageId] = updatedPassageRecord;
 
   // Evaluate Achievements
   const unlocked = new Set<AchievementId>(profile.unlockedAchievements || []);
@@ -441,18 +406,18 @@ export async function recordSessionAndUpdateProfile(
   };
 
   const nextTotalWordsRead = profile.totalWordsRead + wordsRead;
+  const nextBaselineWpm =
+    profile.baselineWpm ||
+    Math.max(80, Math.min(600, Math.round(session.rawWpm)));
 
-  if (isCalibration) {
-    grant('NEURAL_CALIBRATED');
-  }
-  if (!isCalibration && quizPassed) {
+  grant('NEURAL_CALIBRATED');
+  if (quizPassed) {
     grant('FIRST_SYNC');
   }
   if (quizPassed && session.effectiveWpm >= 180) {
     grant('L2_FLUENCY_TIER');
   }
   if (
-    !isCalibration &&
     wasFirstAttemptOnPassage &&
     quizPassed &&
     session.effectiveWpm >= 238
@@ -471,14 +436,10 @@ export async function recordSessionAndUpdateProfile(
   if (quizPassed && session.effectiveWpm >= 400) {
     grant('APEX_400');
   }
-  if (!isCalibration && session.syncRate >= 0.99) {
+  if (session.syncRate >= 0.99) {
     grant('PERFECT_SYNC');
   }
-  if (
-    !isCalibration &&
-    session.syncRate >= 0.99 &&
-    session.forwardFlowRate >= 0.995
-  ) {
+  if (session.syncRate >= 0.99 && session.forwardFlowRate >= 0.995) {
     grant('CRITICAL_REFLEX');
   }
   if (session.mode === 'tachistoscope' && session.syncRate >= 0.8) {
@@ -495,7 +456,7 @@ export async function recordSessionAndUpdateProfile(
   ) {
     grant('TIME_COMPRESSOR');
   }
-  if (!isCalibration && nextStageCompleted >= 3) {
+  if (nextStageCompleted >= 3) {
     grant('OVERCLOCK_MASTER');
   }
   if (
@@ -534,11 +495,11 @@ export async function recordSessionAndUpdateProfile(
 
   const updated: UserProfile = {
     ...profile,
+    baselineWpm: nextBaselineWpm,
     currentTargetWpm: selectedTargetWpm,
-    bestEffectiveWpm:
-      !isCalibration && quizPassed
-        ? Math.max(profile.bestEffectiveWpm, session.effectiveWpm)
-        : profile.bestEffectiveWpm,
+    bestEffectiveWpm: quizPassed
+      ? Math.max(profile.bestEffectiveWpm, session.effectiveWpm)
+      : profile.bestEffectiveWpm,
     totalWordsRead: nextTotalWordsRead,
     lastActiveDate: today,
     unlockedAchievements: Array.from(unlocked),

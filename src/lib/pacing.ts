@@ -2,7 +2,6 @@ import { QuizQuestion, TrainingMode } from '../types/schema';
 
 export type ScreenState =
   | 'title'
-  | 'calibration'
   | 'home'
   | 'preview'
   | 'reading'
