@@ -153,6 +153,7 @@ export function App() {
   // Active Reading Session State (Double-Cursor: `activeChunkIndex` = Player, `ghostChunkIndex` = Ghost)
   const [activeChunkIndex, setActiveChunkIndex] = useState<number>(0);
   const [ghostChunkIndex, setGhostChunkIndex] = useState<number>(0);
+  const [hasStartedPacing, setHasStartedPacing] = useState<boolean>(false);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [regressionCount, setRegressionCount] = useState<number>(0);
   const [totalSteps, setTotalSteps] = useState<number>(0);
@@ -412,6 +413,7 @@ export function App() {
     soundEngine.playUiClick();
     setActiveChunkIndex(0);
     setGhostChunkIndex(0);
+    setHasStartedPacing(false);
     setRegressionCount(0);
     setTotalSteps(0);
     setSessionResetKey((k) => k + 1);
@@ -561,7 +563,11 @@ export function App() {
 
   // Transition from Reading to Quiz
   const startQuizPhase = useCallback(() => {
-    if (isPlaying && activeChunkIndex < chunkDurationsMsRef.current.length) {
+    if (
+      isPlaying &&
+      hasStartedPacing &&
+      activeChunkIndex < chunkDurationsMsRef.current.length
+    ) {
       chunkDurationsMsRef.current[activeChunkIndex] =
         (chunkDurationsMsRef.current[activeChunkIndex] || 0) +
         Math.max(20, Date.now() - chunkStartTimeRef.current);
@@ -576,11 +582,16 @@ export function App() {
     setLastResponseSec(null);
     questionStartTimeRef.current = Date.now();
     setScreen('quiz');
-  }, [isPlaying, activeChunkIndex, selectedPassage.questions]);
+  }, [isPlaying, hasStartedPacing, activeChunkIndex, selectedPassage.questions]);
 
   const handleAdvanceReadingChunk = useCallback(() => {
     const now = Date.now();
-    if (!isPlaying) {
+    if (!hasStartedPacing) {
+      setHasStartedPacing(true);
+      setIsPlaying(true);
+      setLexiconPopup(null);
+      chunkStartTimeRef.current = now;
+    } else if (!isPlaying) {
       setIsPlaying(true);
       setLexiconPopup(null);
       chunkStartTimeRef.current = now;
@@ -594,6 +605,9 @@ export function App() {
     if (activeChunkIndex < selectedPassage.chunks.length - 1) {
       const nextIdx = activeChunkIndex + 1;
       setActiveChunkIndex(nextIdx);
+      if (!hasStartedPacing) {
+        setGhostChunkIndex(nextIdx);
+      }
       setTotalSteps((s) => s + 1);
       const isMarker = selectedPassage.discourseMarkerIndices.includes(nextIdx);
       soundEngine.playChunkTick(isMarker);
@@ -601,7 +615,13 @@ export function App() {
       soundEngine.playPassTransition(3);
       startQuizPhase();
     }
-  }, [isPlaying, activeChunkIndex, selectedPassage, startQuizPhase]);
+  }, [
+    hasStartedPacing,
+    isPlaying,
+    activeChunkIndex,
+    selectedPassage,
+    startQuizPhase,
+  ]);
 
   // Finalize Session & Save to IndexedDB
   const finalizeSession = useCallback(
@@ -621,6 +641,22 @@ export function App() {
               ).toFixed(1)
             )
           : 2.8;
+
+      // Since chunk 0 is read before the timer starts on the first tap, impute chunk 0's duration
+      // from the player's measured average per-chunk duration across chunks 1..N-1.
+      const recordedAfterStart = chunkDurationsMsRef.current
+        .slice(1)
+        .filter((ms) => ms > 0);
+      if (
+        chunkDurationsMsRef.current.length > 0 &&
+        chunkDurationsMsRef.current[0] === 0 &&
+        recordedAfterStart.length > 0
+      ) {
+        const avgAfterStartMs =
+          recordedAfterStart.reduce((a, b) => a + b, 0) /
+          recordedAfterStart.length;
+        chunkDurationsMsRef.current[0] = Math.round(avgAfterStartMs);
+      }
 
       // Measure actual reading WPM from player's recorded chunk durations (or Tachistoscope adaptive flashMs)
       const totalRecordedMs = chunkDurationsMsRef.current.reduce(
@@ -755,11 +791,12 @@ export function App() {
     ]
   );
 
-  // Auto-advance GHOST cursor during Reading Screen (uses smoothed PB weights if available)
+  // Auto-advance GHOST cursor during Reading Screen (waits until first tap `hasStartedPacing`)
   useEffect(() => {
     if (
       screen !== 'reading' ||
       !isPlaying ||
+      !hasStartedPacing ||
       !hasGhost ||
       selectedMode === 'tachistoscope'
     ) {
@@ -787,6 +824,7 @@ export function App() {
   }, [
     screen,
     isPlaying,
+    hasStartedPacing,
     hasGhost,
     ghostChunkIndex,
     activeWpm,
@@ -1100,6 +1138,7 @@ export function App() {
         active={
           screen === 'reading' &&
           isPlaying &&
+          hasStartedPacing &&
           selectedMode !== 'tachistoscope'
         }
       />
@@ -1194,6 +1233,7 @@ export function App() {
           selectedPassage={selectedPassage}
           profile={profile}
           hasGhost={hasGhost}
+          hasStartedPacing={hasStartedPacing}
           targetWpm={targetWpm}
           setTargetWpm={setTargetWpm}
           activeWpm={activeWpm}

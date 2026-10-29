@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   ChevronRight,
   Languages,
+  MousePointerClick,
   Pause,
   Play,
 } from 'lucide-react';
@@ -117,6 +118,7 @@ interface ReadingScreenProps {
   selectedPassage: TrainingPassage;
   profile: UserProfile;
   hasGhost: boolean;
+  hasStartedPacing: boolean;
   targetWpm: number;
   setTargetWpm: (updater: (prev: number) => number) => void;
   activeWpm: number;
@@ -289,6 +291,7 @@ export function ReadingScreen({
   selectedPassage,
   profile,
   hasGhost,
+  hasStartedPacing,
   targetWpm,
   setTargetWpm,
   activeWpm,
@@ -424,7 +427,7 @@ export function ReadingScreen({
             targetWpm={activeWpm}
             totalWords={selectedPassage.wordCount}
             bestEffectiveWpm={profile.bestEffectiveWpm}
-            isPlaying={isPlaying}
+            isPlaying={isPlaying && hasStartedPacing}
             resetKey={sessionResetKey}
           />
         )}
@@ -453,8 +456,10 @@ export function ReadingScreen({
               {hasGhost ? (
                 <span className="text-[#FFE600] font-bold">
                   ▫ {hasCustomGhostWeights ? 'PB GHOST' : 'GHOST'} (
-                  {ghostChunkIndex + 1}/{selectedPassage.chunks.length} @{' '}
-                  {activeWpm} WPM)
+                  {hasStartedPacing
+                    ? `${ghostChunkIndex + 1}/${selectedPassage.chunks.length} @ ${activeWpm} WPM`
+                    : `STANDBY @ ${activeWpm} WPM`}
+                  )
                 </span>
               ) : (
                 <span className="text-[#FFE600] font-bold">
@@ -462,22 +467,29 @@ export function ReadingScreen({
                 </span>
               )}
             </div>
-            {hasGhost && (
-              <span
-                className={`px-2 py-0.5 border font-bold ${
-                  chunkDelta > 0
-                    ? 'border-[#00F5D4]/60 bg-[#00F5D4]/15 text-[#00F5D4]'
-                    : chunkDelta === 0
-                    ? 'border-[#FFE600]/60 bg-[#FFE600]/15 text-[#FFE600]'
-                    : 'border-[#FF1E7A]/60 bg-[#FF1E7A]/15 text-[#FF1E7A]'
-                }`}
-              >
-                {chunkDelta > 0
-                  ? `▲ +${chunkDelta} AHEAD OF GHOST`
-                  : chunkDelta === 0
-                  ? '● NECK & NECK WITH GHOST'
-                  : `▼ ${chunkDelta} BEHIND GHOST`}
+            {!hasStartedPacing ? (
+              <span className="px-2 py-0.5 border border-[#FFE600] bg-[#FFE600]/20 text-[#FFE600] font-bold flex items-center gap-1 animate-pulse">
+                <MousePointerClick className="w-3 h-3" />
+                <span>TAP / SPACE TO START TIMER &amp; ADVANCE</span>
               </span>
+            ) : (
+              hasGhost && (
+                <span
+                  className={`px-2 py-0.5 border font-bold ${
+                    chunkDelta > 0
+                      ? 'border-[#00F5D4]/60 bg-[#00F5D4]/15 text-[#00F5D4]'
+                      : chunkDelta === 0
+                      ? 'border-[#FFE600]/60 bg-[#FFE600]/15 text-[#FFE600]'
+                      : 'border-[#FF1E7A]/60 bg-[#FF1E7A]/15 text-[#FF1E7A]'
+                  }`}
+                >
+                  {chunkDelta > 0
+                    ? `▲ +${chunkDelta} AHEAD OF GHOST`
+                    : chunkDelta === 0
+                    ? '● NECK & NECK WITH GHOST'
+                    : `▼ ${chunkDelta} BEHIND GHOST`}
+                </span>
+              )
             )}
           </div>
 
@@ -498,6 +510,12 @@ export function ReadingScreen({
                 )}
                 <div className="w-0.5 h-2.5 bg-[#FF1E7A] absolute left-1/2 bottom-0 -translate-x-1/2" />
               </div>
+              {!hasStartedPacing && (
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-[#FFE600] text-[#0D0618] font-terminal text-xs font-extrabold animate-pulse shadow-[0_0_14px_rgba(255,230,0,0.45)]">
+                  <MousePointerClick className="w-3.5 h-3.5" />
+                  <span>TAP ANYWHERE OR PRESS [SPACE] FOR NEXT CHUNK</span>
+                </div>
+              )}
               <div className="flex items-center gap-2">
                 <button
                   type="button"
@@ -566,7 +584,8 @@ export function ReadingScreen({
                 {selectedPassage.chunks.map((chunk, idx) => {
                   const colIdx = idx % 3;
                   const isActive = idx === activeChunkIndex;
-                  const isGhost = hasGhost && idx === ghostChunkIndex;
+                  const isGhost =
+                    hasGhost && hasStartedPacing && idx === ghostChunkIndex;
                   const isPassed = idx < activeChunkIndex;
                   const isCurrentCycle =
                     Math.floor(idx / 3) === Math.floor(activeChunkIndex / 3);
@@ -633,6 +652,12 @@ export function ReadingScreen({
                       >
                         {chunk}
                       </span>
+                      {idx === 0 && !hasStartedPacing && (
+                        <span className="inline-flex items-center gap-1 ml-2 px-2 py-0.5 bg-[#FFE600] text-[#0D0618] font-terminal text-[10px] font-extrabold animate-pulse self-center shadow-[0_0_12px_rgba(255,230,0,0.5)]">
+                          <MousePointerClick className="w-3 h-3" />
+                          <span>TAP / SPACE</span>
+                        </span>
+                      )}
                     </div>
                   );
                 })}
@@ -680,7 +705,8 @@ export function ReadingScreen({
               <div className="pretty-text leading-[2.2] text-lg sm:text-xl font-medium select-none">
                 {selectedPassage.chunks.map((chunk, idx) => {
                   const isActive = idx === activeChunkIndex;
-                  const isGhost = hasGhost && idx === ghostChunkIndex;
+                  const isGhost =
+                    hasGhost && hasStartedPacing && idx === ghostChunkIndex;
                   const isPassed = idx < activeChunkIndex;
                   const isMarker =
                     selectedPassage.discourseMarkerIndices.includes(idx);
@@ -731,7 +757,13 @@ export function ReadingScreen({
                           : selectedMode === 'lexical_anchor'
                           ? renderLexicalAnchorChunk(chunk, isActive)
                           : chunk}
-                      </span>{' '}
+                      </span>
+                      {idx === 0 && !hasStartedPacing && (
+                        <span className="inline-flex items-center gap-1 ml-1.5 mr-1 px-2 py-0.5 bg-[#FFE600] text-[#0D0618] font-terminal text-[10px] font-extrabold animate-pulse align-middle shadow-[0_0_12px_rgba(255,230,0,0.5)]">
+                          <MousePointerClick className="w-3 h-3" />
+                          <span>TAP / SPACE</span>
+                        </span>
+                      )}{' '}
                     </span>
                   );
                 })}
@@ -746,8 +778,13 @@ export function ReadingScreen({
               onClick={onAdvanceChunk}
               className="cyber-btn flex-1 py-3 px-4 bg-[#00F5D4] text-[#0D0618] font-bold text-sm tracking-wider flex items-center justify-center gap-2 shadow-[0_0_16px_rgba(0,245,212,0.25)]"
             >
+              {!hasStartedPacing && (
+                <MousePointerClick className="w-4 h-4 animate-bounce" />
+              )}
               <span>
-                {activeChunkIndex < selectedPassage.chunks.length - 1
+                {!hasStartedPacing
+                  ? `TAP / SPACE TO START & NEXT CHUNK (1/${selectedPassage.chunks.length})`
+                  : activeChunkIndex < selectedPassage.chunks.length - 1
                   ? `NEXT CHUNK (${activeChunkIndex + 1}/${selectedPassage.chunks.length}) [CLICK / SPACE / →]`
                   : 'FINISH PASSAGE → VERIFY [CLICK / SPACE]'}
               </span>
