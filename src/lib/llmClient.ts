@@ -11,6 +11,74 @@ import { buildNormalizedPassage } from './chunker';
 export type LlmProviderType = 'webllm' | 'chrome_ai' | 'ollama' | 'rule_based';
 
 const LLM_PROVIDER_STORAGE_KEY = 'wetware_llm_provider';
+const MODEL_STORAGE_KEY = 'wetware_selected_webllm_model';
+const VERIFIED_MODEL_STORAGE_KEY = 'wetware_verified_webllm_model';
+const LOADING_GUARD_STORAGE_KEY = 'wetware_webllm_loading_in_progress';
+const STABILITY_VERIFICATION_MS = 10_000;
+
+let stabilityTimerId: ReturnType<typeof setTimeout> | null = null;
+
+function cancelStabilityVerificationTimer(): void {
+  if (stabilityTimerId !== null) {
+    clearTimeout(stabilityTimerId);
+    stabilityTimerId = null;
+  }
+}
+
+export function clearVerifiedWebLlmModel(): void {
+  cancelStabilityVerificationTimer();
+  if (typeof window !== 'undefined') {
+    window.localStorage.removeItem(VERIFIED_MODEL_STORAGE_KEY);
+    window.localStorage.removeItem(LOADING_GUARD_STORAGE_KEY);
+  }
+}
+
+export function getVerifiedWebLlmModel(): WebLlmModelId | null {
+  if (typeof window !== 'undefined') {
+    const saved = window.localStorage.getItem(VERIFIED_MODEL_STORAGE_KEY);
+    if (
+      saved &&
+      WEBLLM_MODEL_OPTIONS.some(
+        (m) => m.id.toLowerCase() === saved.toLowerCase()
+      )
+    ) {
+      return saved as WebLlmModelId;
+    }
+  }
+  return null;
+}
+
+/**
+ * Checks whether a previous page session crashed or was terminated while loading/stabilizing
+ * a WebGPU model. If so, clears both the guard and the verified auto-load flag to prevent
+ * a crash loop on reload.
+ */
+export function consumeInterruptedLoadGuard(): boolean {
+  if (typeof window === 'undefined') return false;
+  const inProgress = window.localStorage.getItem(LOADING_GUARD_STORAGE_KEY);
+  if (inProgress) {
+    clearVerifiedWebLlmModel();
+    return true;
+  }
+  return false;
+}
+
+function scheduleModelStabilityVerification(modelId: WebLlmModelId): void {
+  cancelStabilityVerificationTimer();
+  stabilityTimerId = setTimeout(() => {
+    stabilityTimerId = null;
+    if (
+      typeof window !== 'undefined' &&
+      globalState.engine &&
+      globalState.loadedModelId === modelId &&
+      (getSavedLlmProvider() ?? 'webllm') === 'webllm' &&
+      getSavedWebLlmModel() === modelId
+    ) {
+      window.localStorage.removeItem(LOADING_GUARD_STORAGE_KEY);
+      window.localStorage.setItem(VERIFIED_MODEL_STORAGE_KEY, modelId);
+    }
+  }, STABILITY_VERIFICATION_MS);
+}
 
 export function getSavedLlmProvider(): LlmProviderType | null {
   if (typeof window !== 'undefined') {
@@ -41,6 +109,9 @@ export function clearTranslationResultCache(): void {
 
 export function saveLlmProviderSelection(provider: LlmProviderType): void {
   translationResultCache.clear();
+  if (provider !== 'webllm') {
+    clearVerifiedWebLlmModel();
+  }
   if (typeof window !== 'undefined') {
     window.localStorage.setItem(LLM_PROVIDER_STORAGE_KEY, provider);
   }
@@ -83,8 +154,6 @@ export const WEBLLM_MODEL_OPTIONS: WebGpuModelOption[] = [
   },
 ];
 
-const MODEL_STORAGE_KEY = 'wetware_selected_webllm_model';
-
 export function getSavedWebLlmModel(): WebLlmModelId {
   if (typeof window !== 'undefined') {
     const saved = window.localStorage.getItem(MODEL_STORAGE_KEY);
@@ -102,6 +171,9 @@ export function getSavedWebLlmModel(): WebLlmModelId {
 
 export function saveWebLlmModelSelection(modelId: WebLlmModelId): void {
   translationResultCache.clear();
+  if (getVerifiedWebLlmModel() !== modelId) {
+    clearVerifiedWebLlmModel();
+  }
   if (typeof window !== 'undefined') {
     window.localStorage.setItem(MODEL_STORAGE_KEY, modelId);
   }
@@ -469,8 +541,14 @@ export async function checkCachedWebLlmModels(): Promise<
  * Explicitly disposes the active Hachiue WebGPU engine (`GPUDevice.destroy()`)
  * and yields across macrotasks so the mobile GPU driver finishes reclaiming unified memory.
  */
-export async function unloadWebLlmEngine(): Promise<void> {
+export async function unloadWebLlmEngine(options?: {
+  preserveAutoLoad?: boolean;
+}): Promise<void> {
   translationResultCache.clear();
+  cancelStabilityVerificationTimer();
+  if (!options?.preserveAutoLoad) {
+    clearVerifiedWebLlmModel();
+  }
   const hadActiveEngine = Boolean(globalState.engine);
 
   if (globalState.engine) {
@@ -680,7 +758,13 @@ export async function initWebLlmEngine(
           text: 'Swapping VRAM to new model...',
           progress: alreadyCached ? 0 : 0.86,
         });
-        await unloadWebLlmEngine();
+        await unloadWebLlmEngine({ preserveAutoLoad: true });
+      }
+
+      // Set crash-loop guard right before WebGPU buffer allocation (`HachiueEngine.create`).
+      // Cleared once the model finishes loading and runs stably for `STABILITY_VERIFICATION_MS`.
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(LOADING_GUARD_STORAGE_KEY, resolvedModelId);
       }
 
       const engine = await HachiueEngine.create({
@@ -709,13 +793,18 @@ export async function initWebLlmEngine(
         onDeviceLost: () => {
           globalState.engine = null;
           globalState.loadedModelId = null;
+          clearVerifiedWebLlmModel();
         },
       });
 
       globalState.engine = engine;
       globalState.loadedModelId = resolvedModelId;
       translationResultCache.clear();
+      scheduleModelStabilityVerification(resolvedModelId);
       return engine;
+    } catch (err) {
+      clearVerifiedWebLlmModel();
+      throw err;
     } finally {
       globalState.loadingPromise = null;
       globalState.loadingModelId = null;

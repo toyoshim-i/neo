@@ -64,6 +64,9 @@ import {
   getSavedTranslationLang,
   getSavedCloudTranslationEnabled,
   translateSelection,
+  consumeInterruptedLoadGuard,
+  getVerifiedWebLlmModel,
+  initWebLlmEngine,
 } from './lib/llmClient';
 import { buildNormalizedPassage } from './lib/chunker';
 import {
@@ -217,34 +220,106 @@ export function App() {
     }
   }, []);
 
-  // Initial boot: load IndexedDB and auto-select a cached WebLLM model once on mount
+  // Initial boot: load IndexedDB, auto-select a cached WebLLM model, and auto-load into VRAM
+  // after page load has settled if the selected model was previously verified as stable
   useEffect(() => {
+    let cancelled = false;
+    let settleTimerId: ReturnType<typeof setTimeout> | null = null;
+    let removeLoadListener: (() => void) | null = null;
+
+    const wasInterrupted = consumeInterruptedLoadGuard();
     reloadFromDb();
+
     checkCachedWebLlmModels().then((cacheMap) => {
+      if (cancelled) return;
       setCachedModels(cacheMap);
-      setSelectedWebLlmModel((initialModel) => {
-        if (!cacheMap[initialModel]) {
-          const cachedEntry = WEBLLM_MODEL_OPTIONS.find((m) => cacheMap[m.id]);
-          if (cachedEntry) {
-            saveWebLlmModelSelection(cachedEntry.id);
-            setWebLlmStatus(
-              isWebLlmReady(cachedEntry.id)
-                ? 'READY IN VRAM'
-                : 'CACHED ON DISK (READY TO LOAD)'
-            );
-            return cachedEntry.id;
-          }
+
+      let resolvedModel: WebLlmModelId = selectedWebLlmModel;
+      if (!cacheMap[resolvedModel]) {
+        const cachedEntry = WEBLLM_MODEL_OPTIONS.find((m) => cacheMap[m.id]);
+        if (cachedEntry) {
+          resolvedModel = cachedEntry.id;
+          saveWebLlmModelSelection(resolvedModel);
+          setSelectedWebLlmModel(resolvedModel);
         }
-        setWebLlmStatus(
-          isWebLlmReady(initialModel)
-            ? 'READY IN VRAM'
-            : cacheMap[initialModel]
-            ? 'CACHED ON DISK (READY TO LOAD)'
-            : 'NOT DOWNLOADED'
-        );
-        return initialModel;
-      });
+      }
+
+      if (wasInterrupted) {
+        setWebLlmStatus('AUTO-LOAD SKIPPED (PREVIOUS LOAD INTERRUPTED)');
+        return;
+      }
+
+      setWebLlmStatus(
+        isWebLlmReady(resolvedModel)
+          ? 'READY IN VRAM'
+          : cacheMap[resolvedModel]
+          ? 'CACHED ON DISK (READY TO LOAD)'
+          : 'NOT DOWNLOADED'
+      );
+
+      const activeProvider =
+        getSavedLlmProvider() ?? (isWebGpuSupported() ? 'webllm' : 'rule_based');
+      const verifiedModel = getVerifiedWebLlmModel();
+
+      if (
+        activeProvider === 'webllm' &&
+        verifiedModel === resolvedModel &&
+        cacheMap[resolvedModel] &&
+        !isWebLlmReady(resolvedModel) &&
+        !isWebLlmLoading()
+      ) {
+        const scheduleSettledAutoLoad = () => {
+          settleTimerId = setTimeout(() => {
+            if (cancelled) return;
+            const currentProvider =
+              getSavedLlmProvider() ?? (isWebGpuSupported() ? 'webllm' : 'rule_based');
+            if (
+              currentProvider !== 'webllm' ||
+              getVerifiedWebLlmModel() !== resolvedModel ||
+              isWebLlmReady(resolvedModel) ||
+              isWebLlmLoading()
+            ) {
+              return;
+            }
+            setIsPreloadingWebLlm(true);
+            setWebLlmStatus('AUTO-LOADING VERIFIED MODEL INTO VRAM...');
+            initWebLlmEngine(resolvedModel).then((ok) => {
+              if (cancelled) return;
+              setIsPreloadingWebLlm(false);
+              if (ok) {
+                setWebLlmProgressPct(100);
+                setWebLlmStatus('READY IN VRAM // GPU LOADED');
+              }
+            });
+          }, 1500);
+        };
+
+        if (document.readyState === 'complete') {
+          scheduleSettledAutoLoad();
+        } else {
+          const onWindowLoad = () => {
+            window.removeEventListener('load', onWindowLoad);
+            removeLoadListener = null;
+            if (!cancelled) {
+              scheduleSettledAutoLoad();
+            }
+          };
+          window.addEventListener('load', onWindowLoad);
+          removeLoadListener = () => window.removeEventListener('load', onWindowLoad);
+        }
+      }
     });
+
+    return () => {
+      cancelled = true;
+      if (settleTimerId !== null) {
+        clearTimeout(settleTimerId);
+      }
+      if (removeLoadListener) {
+        removeLoadListener();
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reloadFromDb]);
 
   // Subscribe to WebLLM download progress globally (persists even when Settings modal is closed)
