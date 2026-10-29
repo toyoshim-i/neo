@@ -114,7 +114,14 @@ export function LexiconPopover({
         <div className="min-w-0 flex-1">
           <div className="text-[10px] text-[#6C7A89] truncate">
             {popup.activeQuery} ({translationLang.toUpperCase()}
-            {popup.source ? ` · ${popup.source.toUpperCase()}` : ''})
+            {popup.source
+              ? ` · ${
+                  popup.source === 'webllm'
+                    ? 'HACHIUE'
+                    : popup.source.toUpperCase()
+                }`
+              : ''}
+            )
           </div>
           {popup.loading ? (
             <div className="text-[#00F5D4] text-xs flex items-center gap-1.5 mt-0.5">

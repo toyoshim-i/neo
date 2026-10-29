@@ -905,7 +905,11 @@ export function App() {
           setBgQuizStatus({
             passageId: basePassage.id,
             state: 'ready',
-            detail: `AI QUIZ READY (${usedProvider.toUpperCase()})`,
+            detail: `AI QUIZ READY (${
+              usedProvider === 'webllm'
+                ? 'HACHIUE'
+                : usedProvider.toUpperCase()
+            })`,
           });
         } else {
           setBgQuizStatus({

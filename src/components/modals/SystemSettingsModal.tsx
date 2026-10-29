@@ -249,7 +249,7 @@ export function SystemSettingsModal({
                   </div>
                   <div className="text-[10px] text-[#6C7A89]">
                     Query MyMemory external translation API when local AI
-                    (WebLLM / Chrome Built-in AI) is unavailable. Default: OFF.
+                    (Hachiue / Chrome Built-in AI) is unavailable. Default: OFF.
                   </div>
                 </div>
                 <button
@@ -700,7 +700,11 @@ export function SystemSettingsModal({
                     <span>
                       {isRunningLlmDiag
                         ? 'RUNNING INFERENCE TEST...'
-                        : `RUN DIAGNOSTIC TEST (${llmProvider.toUpperCase()})`}
+                        : `RUN DIAGNOSTIC TEST (${
+                            llmProvider === 'webllm'
+                              ? 'HACHIUE'
+                              : llmProvider.toUpperCase()
+                          })`}
                     </span>
                   </button>
 
@@ -714,7 +718,10 @@ export function SystemSettingsModal({
                     <div className="space-y-2 pt-1 border-t border-[#6C7A89]/30 text-[10px]">
                       <div className="flex items-center justify-between">
                         <span className="text-[#00F5D4] font-bold">
-                          BACKEND: {llmDiagResult.usedProvider.toUpperCase()}
+                          BACKEND:{' '}
+                          {llmDiagResult.usedProvider === 'webllm'
+                            ? 'HACHIUE'
+                            : llmDiagResult.usedProvider.toUpperCase()}
                         </span>
                         <span className="text-[#FFE600]">
                           LATENCY: {llmDiagResult.elapsedMs} ms
