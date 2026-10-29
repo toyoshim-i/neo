@@ -17,10 +17,7 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
-    "noUncheckedSideEffectImports": true,
-    "paths": {
-      "hachiue": ["./third_party/hachiue/src/index.ts"]
-    }
+    "noUncheckedSideEffectImports": true
   },
-  "include": ["src", "third_party/hachiue/src"]
+  "include": ["src"]
 }

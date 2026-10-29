@@ -4,7 +4,7 @@ import {
   isModelCached,
   prefetchModel,
   type ParsedGgufHeader,
-} from '../../third_party/hachiue/src/index';
+} from 'hachiue';
 import { TrainingPassage, QuizQuestion } from '../types/schema';
 import { buildNormalizedPassage } from './chunker';
 
