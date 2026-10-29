@@ -131,11 +131,73 @@ export function HomeScreen({
         </div>
       )}
 
-      {/* 1. Speed & Mode Configuration */}
+      {/* Selected Passage Card (First: choose passage & preview before running training patterns) */}
+      <ChamferedPanel
+        variant="alt"
+        cutSize={12}
+        tag="READING MATERIAL"
+        title="TARGET PASSAGE"
+      >
+        <div className="p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="space-y-1.5">
+            <div className="flex flex-wrap items-center gap-2 font-terminal text-xs">
+              <span className="px-2 py-0.5 bg-[#00F5D4]/15 border border-[#00F5D4]/50 text-[#00F5D4] font-bold">
+                {selectedPassage.category}
+              </span>
+              <span className="text-[#6C7A89]">
+                {selectedPassage.wordCount} words // ~{estimatedSeconds}s
+              </span>
+              {bgQuizStatus?.passageId === selectedPassage.id && (
+                <span
+                  className={`px-2 py-0.5 text-[10px] border flex items-center gap-1 ${
+                    bgQuizStatus.state === 'running'
+                      ? 'border-[#FFE600]/60 text-[#FFE600] bg-[#FFE600]/10'
+                      : bgQuizStatus.state === 'ready'
+                      ? 'border-[#00F5D4]/60 text-[#00F5D4] bg-[#00F5D4]/10'
+                      : 'border-[#6C7A89]/50 text-[#6C7A89]'
+                  }`}
+                >
+                  {bgQuizStatus.state === 'running' && (
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                  )}
+                  <span>{bgQuizStatus.detail}</span>
+                </span>
+              )}
+            </div>
+            <h2 className="text-base sm:text-lg font-bold text-[#F2F5F8]">
+              {selectedPassage.title}
+            </h2>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={onOpenPreview}
+              className="cyber-btn px-3.5 py-2 bg-[#180B29] border border-[#FFE600] text-xs text-[#FFE600] font-bold hover:bg-[#FFE600]/15 flex items-center gap-1.5"
+            >
+              <Eye className="w-3.5 h-3.5" />
+              <span>PREVIEW &amp; VOCAB</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                soundEngine.playUiClick();
+                onOpenPassageModal();
+              }}
+              className="cyber-btn px-3.5 py-2 bg-[#0D0618] border border-[#6C7A89]/50 text-xs text-[#F2F5F8] hover:border-[#00F5D4] hover:text-[#00F5D4] flex items-center gap-1.5"
+            >
+              <BookOpen className="w-3.5 h-3.5" />
+              <span>CHANGE PASSAGE</span>
+            </button>
+          </div>
+        </div>
+      </ChamferedPanel>
+
+      {/* Speed & Mode Configuration */}
       <ChamferedPanel
         variant="cyan"
         cutSize={12}
-        tag={appMode === 'guided' ? 'COACH PRESCRIPTION' : 'STEP 01'}
+        tag={appMode === 'guided' ? 'COACH PRESCRIPTION' : 'TRAINING CONFIG'}
         title={
           appMode === 'guided'
             ? 'ADAPTIVE 3-MODE ROTATION & SPEED (ADJUSTABLE)'
@@ -374,89 +436,16 @@ export function HomeScreen({
         </div>
       </ChamferedPanel>
 
-      {/* 2. Selected Passage Card (Single focused card, switchable via modal) */}
-      <ChamferedPanel
-        variant="alt"
-        cutSize={12}
-        tag="STEP 02"
-        title="TARGET PASSAGE"
+      {/* Primary Call To Action */}
+      <button
+        type="button"
+        onClick={onStartReadingSession}
+        className="cyber-btn w-full py-4 px-6 bg-[#00F5D4] text-[#0D0618] font-bold text-base sm:text-lg tracking-wider flex items-center justify-center gap-3 shadow-[0_0_25px_rgba(0,245,212,0.35)] hover:brightness-110"
       >
-        <div className="p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="space-y-1.5">
-            <div className="flex flex-wrap items-center gap-2 font-terminal text-xs">
-              <span className="px-2 py-0.5 bg-[#00F5D4]/15 border border-[#00F5D4]/50 text-[#00F5D4] font-bold">
-                {selectedPassage.category}
-              </span>
-              <span className="text-[#6C7A89]">
-                {selectedPassage.wordCount} words // ~{estimatedSeconds}s
-              </span>
-              {bgQuizStatus?.passageId === selectedPassage.id && (
-                <span
-                  className={`px-2 py-0.5 text-[10px] border flex items-center gap-1 ${
-                    bgQuizStatus.state === 'running'
-                      ? 'border-[#FFE600]/60 text-[#FFE600] bg-[#FFE600]/10'
-                      : bgQuizStatus.state === 'ready'
-                      ? 'border-[#00F5D4]/60 text-[#00F5D4] bg-[#00F5D4]/10'
-                      : 'border-[#6C7A89]/50 text-[#6C7A89]'
-                  }`}
-                >
-                  {bgQuizStatus.state === 'running' && (
-                    <Loader2 className="w-3 h-3 animate-spin" />
-                  )}
-                  <span>{bgQuizStatus.detail}</span>
-                </span>
-              )}
-            </div>
-            <h2 className="text-base sm:text-lg font-bold text-[#F2F5F8]">
-              {selectedPassage.title}
-            </h2>
-          </div>
-
-          <div className="flex items-center gap-2 shrink-0">
-            <button
-              type="button"
-              onClick={onOpenPreview}
-              className="cyber-btn px-3 py-2 bg-[#0D0618] border border-[#FFE600]/60 text-xs text-[#FFE600] hover:bg-[#FFE600]/15 flex items-center gap-1.5"
-            >
-              <Eye className="w-3.5 h-3.5" />
-              <span>PREVIEW</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                soundEngine.playUiClick();
-                onOpenPassageModal();
-              }}
-              className="cyber-btn px-3.5 py-2 bg-[#0D0618] border border-[#6C7A89]/50 text-xs text-[#F2F5F8] hover:border-[#00F5D4] hover:text-[#00F5D4] flex items-center gap-1.5"
-            >
-              <BookOpen className="w-3.5 h-3.5" />
-              <span>CHANGE PASSAGE</span>
-            </button>
-          </div>
-        </div>
-      </ChamferedPanel>
-
-      {/* 3. Primary Call To Action + Pre-Flight Vocabulary Preview */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <button
-          type="button"
-          onClick={onOpenPreview}
-          className="cyber-btn py-4 px-4 bg-[#180B29] border-2 border-[#FFE600] text-[#FFE600] font-bold text-xs sm:text-sm tracking-wider flex items-center justify-center gap-2 hover:bg-[#FFE600]/15"
-        >
-          <Eye className="w-4 h-4 shrink-0" />
-          <span>PREVIEW TEXT &amp; VOCAB</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={onStartReadingSession}
-          className="cyber-btn sm:col-span-2 py-4 px-6 bg-[#00F5D4] text-[#0D0618] font-bold text-base sm:text-lg tracking-wider flex items-center justify-center gap-3 shadow-[0_0_25px_rgba(0,245,212,0.35)] hover:brightness-110"
-        >
-          <Zap className="w-5 h-5 fill-current" />
-          <span>START READING SESSION</span>
-          <ChevronRight className="w-5 h-5" />
-        </button>
-      </div>
+        <Zap className="w-5 h-5 fill-current" />
+        <span>START READING SESSION</span>
+        <ChevronRight className="w-5 h-5" />
+      </button>
     </main>
   );
 }
