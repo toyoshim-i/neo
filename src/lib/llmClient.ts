@@ -1261,39 +1261,35 @@ export async function processPassageWithOptionalLlm(params: {
   };
 }
 
+interface ChromeLanguageModelSession {
+  prompt: (input: string, options?: { responseConstraint?: unknown }) => Promise<string>;
+  clone?: () => Promise<ChromeLanguageModelSession>;
+  destroy?: () => void;
+}
+
+const chromePromptBaseSessions = new Map<string, ChromeLanguageModelSession>();
+
 /**
- * Checks whether Chrome Built-in Prompt API (Gemini Nano) is available.
- * Supports both the standard `LanguageModel` global (Chrome 138+) and
- * legacy `self.ai.languageModel` (Chrome 127–137).
+ * Checks whether Chrome Built-in Prompt API (Gemini Nano) is available
+ * via the standard `LanguageModel` global (`'LanguageModel' in self`).
  */
 export async function checkChromePromptApiAvailability(): Promise<{
   supported: boolean;
   status: 'available' | 'downloadable' | 'downloading' | 'unavailable';
   detail: string;
 }> {
-  if (typeof self === 'undefined') {
+  if (typeof self === 'undefined' || !('LanguageModel' in self)) {
     return {
       supported: false,
       status: 'unavailable',
-      detail: 'Not in browser context',
+      detail:
+        'Chrome Prompt API not detected (Enable chrome://flags/#prompt-api-for-gemini-nano on Desktop Chrome)',
     };
   }
+
   const g = self as unknown as {
     LanguageModel?: {
       availability?: () => Promise<string>;
-      create?: (opts?: unknown) => Promise<{
-        prompt: (input: string) => Promise<string>;
-        destroy?: () => void;
-      }>;
-    };
-    ai?: {
-      languageModel?: {
-        capabilities?: () => Promise<{ available?: string }>;
-        create?: (opts?: unknown) => Promise<{
-          prompt: (input: string) => Promise<string>;
-          destroy?: () => void;
-        }>;
-      };
     };
   };
 
@@ -1327,33 +1323,6 @@ export async function checkChromePromptApiAvailability(): Promise<{
         detail: `LanguageModel status: ${avail}`,
       };
     }
-
-    if (
-      g.ai?.languageModel &&
-      typeof g.ai.languageModel.capabilities === 'function'
-    ) {
-      const caps = await g.ai.languageModel.capabilities();
-      const avail = caps?.available || 'no';
-      if (avail === 'readily' || avail === 'available') {
-        return {
-          supported: true,
-          status: 'available',
-          detail: 'GEMINI NANO READY (window.ai.languageModel)',
-        };
-      }
-      if (avail === 'after-download' || avail === 'downloadable') {
-        return {
-          supported: true,
-          status: 'downloadable',
-          detail: 'GEMINI NANO DOWNLOADABLE ON DEMAND',
-        };
-      }
-      return {
-        supported: false,
-        status: 'unavailable',
-        detail: `window.ai.languageModel status: ${avail}`,
-      };
-    }
   } catch (err) {
     return {
       supported: false,
@@ -1365,77 +1334,106 @@ export async function checkChromePromptApiAvailability(): Promise<{
   return {
     supported: false,
     status: 'unavailable',
-    detail:
-      'Chrome Prompt API not detected (Enable chrome://flags/#prompt-api-for-gemini-nano on Desktop Chrome)',
+    detail: 'Chrome Prompt API unavailable on this device',
   };
 }
 
 /**
- * Runs a prompt on Chrome Built-in Gemini Nano (`LanguageModel` or `self.ai.languageModel`).
+ * Runs a prompt on Chrome Built-in Gemini Nano (`LanguageModel`).
+ * Uses the `initialPrompts` + `session.clone()` pattern so system instructions
+ * are parsed once on the base session and each task runs on an isolated clone
+ * that is destroyed immediately after completion.
  */
 export async function promptChromeBuiltInAi(
   promptText: string,
   systemInstruction?: string
 ): Promise<string> {
-  const g = self as unknown as {
-    LanguageModel?: {
-      create: (opts?: unknown) => Promise<{
-        prompt: (input: string) => Promise<string>;
-        destroy?: () => void;
-      }>;
-    };
-    ai?: {
-      languageModel?: {
-        create: (opts?: unknown) => Promise<{
-          prompt: (input: string) => Promise<string>;
-          destroy?: () => void;
-        }>;
-      };
-    };
-  };
-
-  const createFn =
-    g.LanguageModel?.create?.bind(g.LanguageModel) ||
-    g.ai?.languageModel?.create?.bind(g.ai.languageModel);
-
-  if (!createFn) {
+  if (typeof self === 'undefined' || !('LanguageModel' in self)) {
     throw new Error(
       'Chrome Built-in Prompt API (Gemini Nano) is not available in this browser.'
     );
   }
 
-  const session = await createFn(
-    systemInstruction
-      ? {
-          systemPrompt: systemInstruction,
-          initialPrompts: [{ role: 'system', content: systemInstruction }],
-        }
-      : undefined
-  );
+  const g = self as unknown as {
+    LanguageModel?: {
+      availability?: () => Promise<string>;
+      create?: (opts?: {
+        initialPrompts?: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
+      }) => Promise<ChromeLanguageModelSession>;
+    };
+  };
+
+  if (!g.LanguageModel || typeof g.LanguageModel.create !== 'function') {
+    throw new Error(
+      'Chrome Built-in Prompt API (Gemini Nano) is not available in this browser.'
+    );
+  }
+
+  if (typeof g.LanguageModel.availability === 'function') {
+    const avail = await g.LanguageModel.availability();
+    if (avail === 'unavailable') {
+      throw new Error('Gemini Nano is unavailable on this device.');
+    }
+  }
+
+  const sysKey = systemInstruction?.trim() || '';
+  let baseSession = chromePromptBaseSessions.get(sysKey);
+  if (!baseSession) {
+    baseSession = await g.LanguageModel.create(
+      sysKey
+        ? {
+            initialPrompts: [{ role: 'system', content: sysKey }],
+          }
+        : undefined
+    );
+    chromePromptBaseSessions.set(sysKey, baseSession);
+  }
+
+  let taskSession: ChromeLanguageModelSession;
+  let isCloned = false;
+  if (typeof baseSession.clone === 'function') {
+    try {
+      taskSession = await baseSession.clone();
+      isCloned = true;
+    } catch {
+      chromePromptBaseSessions.delete(sysKey);
+      baseSession.destroy?.();
+      taskSession = await g.LanguageModel.create(
+        sysKey
+          ? {
+              initialPrompts: [{ role: 'system', content: sysKey }],
+            }
+          : undefined
+      );
+    }
+  } else {
+    taskSession = baseSession;
+    chromePromptBaseSessions.delete(sysKey);
+  }
+
   try {
-    const fullPrompt = systemInstruction
-      ? `${systemInstruction}\n\n${promptText}`
-      : promptText;
-    return await session.prompt(fullPrompt);
+    return await taskSession.prompt(promptText);
   } finally {
-    session.destroy?.();
+    if (isCloned || !chromePromptBaseSessions.has(sysKey)) {
+      taskSession.destroy?.();
+    }
   }
 }
 
 const chromeTranslatorCache = new Map<
   string,
-  { translate: (text: string) => Promise<string> }
+  { translate: (text: string) => Promise<string>; destroy?: () => void }
 >();
 
 /**
- * Translates text using Chrome's Built-in On-Device Translator API (`Translator` / `window.ai.translator`)
+ * Translates text using Chrome's Built-in On-Device Translator API (`self.Translator`)
  * if available in the browser. Returns null if unsupported.
  */
 export async function translateWithChromeBuiltInTranslator(
   text: string,
   targetLang: TranslationLangCode
 ): Promise<string | null> {
-  if (typeof self === 'undefined') return null;
+  if (typeof self === 'undefined' || !('Translator' in self)) return null;
 
   const cached = chromeTranslatorCache.get(targetLang);
   if (cached) {
@@ -1443,6 +1441,7 @@ export async function translateWithChromeBuiltInTranslator(
       const out = await cached.translate(text);
       if (out?.trim()) return out.trim();
     } catch {
+      cached.destroy?.();
       chromeTranslatorCache.delete(targetLang);
     }
   }
@@ -1456,56 +1455,30 @@ export async function translateWithChromeBuiltInTranslator(
       create?: (opts: {
         sourceLanguage: string;
         targetLanguage: string;
-      }) => Promise<{ translate: (input: string) => Promise<string> }>;
-    };
-    ai?: {
-      translator?: {
-        create?: (opts: {
-          sourceLanguage: string;
-          targetLanguage: string;
-        }) => Promise<{ translate: (input: string) => Promise<string> }>;
-      };
-    };
-    translation?: {
-      createTranslator?: (opts: {
-        sourceLanguage: string;
-        targetLanguage: string;
-      }) => Promise<{ translate: (input: string) => Promise<string> }>;
+      }) => Promise<{
+        translate: (input: string) => Promise<string>;
+        destroy?: () => void;
+      }>;
     };
   };
 
   try {
     if (g.Translator && typeof g.Translator.create === 'function') {
+      const options = {
+        sourceLanguage: 'en',
+        targetLanguage: targetLang,
+      };
       if (typeof g.Translator.availability === 'function') {
-        const avail = await g.Translator.availability({
-          sourceLanguage: 'en',
-          targetLanguage: targetLang,
-        });
-        if (avail === 'unavailable' || avail === 'no') return null;
+        const avail = await g.Translator.availability(options);
+        if (avail === 'unavailable') return null;
       }
-      const instance = await g.Translator.create({
-        sourceLanguage: 'en',
-        targetLanguage: targetLang,
-      });
-      chromeTranslatorCache.set(targetLang, instance);
-      const out = await instance.translate(text);
-      if (out?.trim()) return out.trim();
-    }
-
-    const legacyCreate =
-      g.ai?.translator?.create?.bind(g.ai.translator) ||
-      g.translation?.createTranslator?.bind(g.translation);
-    if (legacyCreate) {
-      const instance = await legacyCreate({
-        sourceLanguage: 'en',
-        targetLanguage: targetLang,
-      });
+      const instance = await g.Translator.create(options);
       chromeTranslatorCache.set(targetLang, instance);
       const out = await instance.translate(text);
       if (out?.trim()) return out.trim();
     }
   } catch {
-    // Built-in Translator not available or language pack not ready
+    // Built-in Translator not available or language pack requires user gesture
   }
   return null;
 }

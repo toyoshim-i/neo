@@ -45,6 +45,20 @@ body {
   letter-spacing: 0.04em;
 }
 
+/* Target specific heading elements for balanced wrapping */
+h1,
+h2,
+h3 {
+  text-wrap: balance;
+}
+
+/* Apply to multi-line text blocks to prevent orphaned words */
+p,
+blockquote,
+.pretty-text {
+  text-wrap: pretty;
+}
+
 /* Section 2.2: チャンファー（斜め角落とし）パネル */
 .cyber-panel {
   background: var(--bg-panel);

@@ -101,7 +101,7 @@ export function PreviewScreen({
           )}
         </div>
 
-        <div className="leading-[2.2] text-lg sm:text-xl font-medium select-none">
+        <div className="pretty-text leading-[2.2] text-lg sm:text-xl font-medium select-none">
           {selectedPassage.chunks.map((chunk, idx) => {
             const isChecked = previewCheckedIndices.includes(idx);
             const isSelectedInPopup = lexiconPopup?.chunkIdx === idx;

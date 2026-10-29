@@ -53,7 +53,7 @@ export function CalibrationScreen({
         <div
           data-chunk-interactive="true"
           onClick={onAdvanceChunk}
-          className="leading-[2.2] text-lg sm:text-xl font-medium select-none cursor-pointer p-2"
+          className="pretty-text leading-[2.2] text-lg sm:text-xl font-medium select-none cursor-pointer p-2"
         >
           {CALIBRATION_PASSAGE.chunks.map((chunk, idx) => {
             const isActive = idx === activeChunkIndex;
