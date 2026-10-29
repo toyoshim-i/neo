@@ -202,12 +202,22 @@ export const TachistoscopeView: React.FC<TachistoscopeViewProps> = ({
 
   const setupRound = useCallback(
     (roundIdx: number) => {
-      // Prefer multi-word chunks (2+ words) so peripheral width is genuinely tested
-      const multiWordPool = passage.chunks.filter(
+      // Prefer compact multi-word chunks (2-3 words, 8-22 chars) that fit cleanly on a single
+      // horizontal parafoveal line without exceeding single-fixation span
+      const compactMultiWordPool = passage.chunks.filter((c) => {
+        const trimmed = c.trim();
+        const wordCount = trimmed.split(/\s+/).length;
+        return wordCount >= 2 && trimmed.length >= 8 && trimmed.length <= 22;
+      });
+      const fallbackMultiWordPool = passage.chunks.filter(
         (c) => c.trim().split(/\s+/).length >= 2 && c.length >= 8
       );
       const sourcePool =
-        multiWordPool.length >= 4 ? multiWordPool : passage.chunks;
+        compactMultiWordPool.length >= 4
+          ? compactMultiWordPool
+          : fallbackMultiWordPool.length >= 4
+          ? fallbackMultiWordPool
+          : passage.chunks;
       const chosenIdx = (roundIdx * 7 + 3) % sourcePool.length;
       const target = sourcePool[chosenIdx];
 
@@ -286,9 +296,9 @@ export const TachistoscopeView: React.FC<TachistoscopeViewProps> = ({
       className="flex-1 flex flex-col justify-center"
       innerClassName="p-6 sm:p-10 justify-center"
     >
-      <div className="max-w-xl mx-auto w-full space-y-8 text-center">
+      <div className="max-w-2xl mx-auto w-full space-y-8 text-center">
         {/* Flash Reticle Window */}
-        <div className="h-32 bg-[#0D0618] border border-[#00F5D4]/50 flex items-center justify-center relative">
+        <div className="h-32 bg-[#0D0618] border border-[#00F5D4]/50 flex items-center justify-center relative overflow-hidden px-3">
           <div className="absolute top-2 left-3 font-terminal text-[10px] text-[#6C7A89]">
             EXPOSURE: {flashMs} MS // FULL-SPAN CHECK
           </div>
@@ -302,7 +312,15 @@ export const TachistoscopeView: React.FC<TachistoscopeViewProps> = ({
             </span>
           )}
           {phase === 'flashing' && (
-            <span className="font-terminal text-2xl sm:text-4xl font-bold text-[#00F5D4] tracking-wide select-none px-4">
+            <span
+              className={`font-terminal whitespace-nowrap font-bold text-[#00F5D4] tracking-wide select-none ${
+                targetChunk.length > 22
+                  ? 'text-base sm:text-2xl'
+                  : targetChunk.length > 16
+                  ? 'text-lg sm:text-3xl'
+                  : 'text-xl sm:text-4xl'
+              }`}
+            >
               {targetChunk}
             </span>
           )}
