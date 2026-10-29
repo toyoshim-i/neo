@@ -310,28 +310,15 @@ export function ReadingScreen({
   onCompleteTachistoscope,
 }: ReadingScreenProps) {
   const activeSaccadeRowRef = useRef<HTMLDivElement | null>(null);
-  const activeSaccadeRowIdx = Math.floor(activeChunkIndex / 3);
 
   useEffect(() => {
     if (selectedMode === 'saccade_rail' && activeSaccadeRowRef.current) {
       activeSaccadeRowRef.current.scrollIntoView({
-        block: 'nearest',
+        block: 'center',
         behavior: 'smooth',
       });
     }
-  }, [selectedMode, activeSaccadeRowIdx]);
-
-  // Group chunks into 3-column rows for Saccade Rail mode
-  const saccadeRows: Array<Array<{ chunk: string; idx: number }>> = [];
-  if (selectedMode === 'saccade_rail') {
-    for (let i = 0; i < selectedPassage.chunks.length; i += 3) {
-      const row: Array<{ chunk: string; idx: number }> = [];
-      for (let c = 0; c < 3 && i + c < selectedPassage.chunks.length; c++) {
-        row.push({ chunk: selectedPassage.chunks[i + c], idx: i + c });
-      }
-      saccadeRows.push(row);
-    }
-  }
+  }, [selectedMode, activeChunkIndex]);
 
   return (
     <main className="flex-1 max-w-4xl w-full mx-auto px-4 py-6 flex flex-col justify-between gap-5 relative z-20">
@@ -476,25 +463,25 @@ export function ReadingScreen({
               </button>
             </div>
           ) : selectedMode === 'saccade_rail' ? (
-            <div className="space-y-4">
-              {/* 3-Column Fixation Rail Header */}
-              <div className="grid grid-cols-3 gap-2 font-terminal text-[10px] text-[#6C7A89] border-b border-[#00F5D4]/20 pb-2 text-center">
+            <div className="space-y-3">
+              {/* 3-Position Spiral Staircase Rail Header */}
+              <div className="grid grid-cols-3 gap-2 font-terminal text-[10px] text-[#6C7A89] border-b border-[#00F5D4]/20 pb-2">
                 {[
-                  'RAIL L // FIXATION 01',
-                  'RAIL C // FIXATION 02',
-                  'RAIL R // FIXATION 03',
-                ].map((label, colIdx) => {
+                  { label: 'RAIL L // STEP 01', align: 'items-start text-left' },
+                  { label: 'RAIL C // STEP 02', align: 'items-center text-center' },
+                  { label: 'RAIL R // STEP 03', align: 'items-end text-right' },
+                ].map((rail, colIdx) => {
                   const isCurrentCol = activeChunkIndex % 3 === colIdx;
                   return (
                     <div
-                      key={label}
-                      className={`flex flex-col items-center gap-1 transition-colors ${
+                      key={rail.label}
+                      className={`flex flex-col ${rail.align} gap-1 transition-colors ${
                         isCurrentCol
                           ? 'text-[#00F5D4] font-bold'
                           : 'text-[#6C7A89]'
                       }`}
                     >
-                      <span>{label}</span>
+                      <span>{rail.label}</span>
                       <div
                         className={`w-1.5 h-1.5 rounded-full ${
                           isCurrentCol
@@ -507,84 +494,64 @@ export function ReadingScreen({
                 })}
               </div>
 
-              {/* 3-Column Saccade Matrix */}
-              <div className="max-h-[54vh] overflow-y-auto pr-1 space-y-2.5 select-none">
-                {saccadeRows.map((row, rIdx) => {
-                  const isActiveRow = rIdx === activeSaccadeRowIdx;
-                  const isPassedRow = rIdx < activeSaccadeRowIdx;
+              {/* Stepped Spiral Staircase Lines (Left -> Next Line Center -> Next Line Right) */}
+              <div className="max-h-[54vh] overflow-y-auto px-2 sm:px-4 space-y-1.5 select-none relative">
+                {selectedPassage.chunks.map((chunk, idx) => {
+                  const colIdx = idx % 3;
+                  const isActive = idx === activeChunkIndex;
+                  const isPassed = idx < activeChunkIndex;
+                  const isCurrentCycle =
+                    Math.floor(idx / 3) === Math.floor(activeChunkIndex / 3);
+                  const isMarker =
+                    selectedPassage.discourseMarkerIndices.includes(idx);
+
+                  const justifyClass =
+                    colIdx === 0
+                      ? 'justify-start text-left'
+                      : colIdx === 1
+                      ? 'justify-center text-center'
+                      : 'justify-end text-right';
+
                   return (
                     <div
-                      key={rIdx}
-                      ref={isActiveRow ? activeSaccadeRowRef : undefined}
+                      key={idx}
+                      ref={isActive ? activeSaccadeRowRef : undefined}
                       style={{
-                        opacity: isPassedRow && fadeOutPassed ? 0.16 : 1,
+                        opacity: isPassed && fadeOutPassed ? 0.16 : 1,
                       }}
-                      className={`grid grid-cols-3 gap-2 sm:gap-4 items-center py-2 px-2 border transition-colors ${
-                        isActiveRow
-                          ? 'bg-[#180B29]/90 border-[#00F5D4]/40'
-                          : 'bg-[#0D0618]/40 border-transparent'
+                      className={`flex ${justifyClass} py-1 transition-colors ${
+                        colIdx === 2 && idx < selectedPassage.chunks.length - 1
+                          ? 'border-b border-[#00F5D4]/10 pb-2.5 mb-1'
+                          : ''
                       }`}
                     >
-                      {[0, 1, 2].map((colIdx) => {
-                        const cell = row[colIdx];
-                        if (!cell) {
-                          return <div key={colIdx} />;
-                        }
-                        const isActive = cell.idx === activeChunkIndex;
-                        const isMarker =
-                          selectedPassage.discourseMarkerIndices.includes(
-                            cell.idx
-                          );
-                        return (
-                          <div
-                            key={cell.idx}
-                            className="flex flex-col items-center text-center relative"
-                          >
-                            <div
-                              className={`w-1 h-1 mb-1 rounded-full ${
-                                isActive
-                                  ? isMarker
-                                    ? 'bg-[#FF1E7A]'
-                                    : 'bg-[#00F5D4]'
-                                  : 'bg-[#6C7A89]/30'
-                              }`}
-                            />
-                            <span
-                              data-chunk-interactive="true"
-                              onClick={(e) => {
-                                const rect =
-                                  e.currentTarget.getBoundingClientRect();
-                                if (cell.idx < activeChunkIndex) {
-                                  onIncrementRegression();
-                                }
-                                setActiveChunkIndex(cell.idx);
-                                onTranslateChunkOrWord(
-                                  cell.chunk,
-                                  cell.idx,
-                                  cell.chunk,
-                                  {
-                                    x: rect.left + rect.width / 2,
-                                    top: rect.top,
-                                    bottom: rect.bottom,
-                                  }
-                                );
-                              }}
-                              title="Tap to pause & translate"
-                              className={`inline-block whitespace-nowrap px-2 py-0.5 border-b-2 text-sm sm:text-lg font-medium cursor-pointer transition-colors duration-75 ${
-                                isActive
-                                  ? isMarker
-                                    ? 'bg-[#FF1E7A]/20 border-[#FF1E7A] text-[#F2F5F8] font-bold'
-                                    : 'bg-[#00F5D4]/20 border-[#00F5D4] text-[#F2F5F8] font-bold'
-                                  : isActiveRow
-                                  ? 'border-transparent text-[#F2F5F8]/75'
-                                  : 'border-transparent text-[#6C7A89]'
-                              }`}
-                            >
-                              {cell.chunk}
-                            </span>
-                          </div>
-                        );
-                      })}
+                      <span
+                        data-chunk-interactive="true"
+                        onClick={(e) => {
+                          const rect = e.currentTarget.getBoundingClientRect();
+                          if (idx < activeChunkIndex) {
+                            onIncrementRegression();
+                          }
+                          setActiveChunkIndex(idx);
+                          onTranslateChunkOrWord(chunk, idx, chunk, {
+                            x: rect.left + rect.width / 2,
+                            top: rect.top,
+                            bottom: rect.bottom,
+                          });
+                        }}
+                        title="Tap to pause & translate"
+                        className={`inline-block whitespace-nowrap px-2.5 py-0.5 border-b-2 text-base sm:text-xl font-medium cursor-pointer transition-colors duration-75 ${
+                          isActive
+                            ? isMarker
+                              ? 'bg-[#FF1E7A]/20 border-[#FF1E7A] text-[#F2F5F8] font-bold'
+                              : 'bg-[#00F5D4]/20 border-[#00F5D4] text-[#F2F5F8] font-bold'
+                            : isCurrentCycle
+                            ? 'bg-[#180B29]/50 border-transparent text-[#F2F5F8]/80'
+                            : 'border-transparent text-[#6C7A89]'
+                        }`}
+                      >
+                        {chunk}
+                      </span>
                     </div>
                   );
                 })}
