@@ -114,19 +114,19 @@ export const ACHIEVEMENT_CATALOG: readonly AchievementDefinition[] = [
   },
   {
     id: 'TIME_COMPRESSOR',
-    title: 'TIME COMPRESSOR',
-    subtitle: '4/3/2 Overclock Clear',
+    title: 'SYNTAX ARCHITECT',
+    subtitle: 'ESL Structural Mode Clear',
     description:
-      'Complete all three 100% -> 75% -> 50% compression passes in 4/3/2 Overclock mode with verified comprehension.',
-    badgeCode: 'CMP-13',
+      'Pass a comprehension quiz in Syntax Skimmer, Lexical Anchor, or Saccade Rail mode.',
+    badgeCode: 'SYN-13',
   },
   {
     id: 'TRI_ENGINE_PILOT',
-    title: 'TRI-ENGINE PILOT',
-    subtitle: '3 Core Modes Verified',
+    title: 'OMNI-ENGINE PILOT',
+    subtitle: '3+ Distinct Modes Verified',
     description:
-      'Pass comprehension verification across Chunk Pacer, RSVP Stream, and Tachistoscope modes.',
-    badgeCode: 'TRI-14',
+      'Pass comprehension verification across at least 3 distinct training engines.',
+    badgeCode: 'OMN-14',
   },
   {
     id: 'OVERCLOCK_MASTER',
@@ -270,15 +270,18 @@ export async function getOrInitProfile(): Promise<UserProfile> {
     if (passedSessions.some((s) => s.mode === 'rsvp' && s.effectiveWpm >= 220)) {
       unlocked.add('ORP_LOCKED');
     }
-    if (passedSessions.some((s) => s.mode === 'overclock_432')) {
+    if (
+      passedSessions.some(
+        (s) =>
+          s.mode === 'syntax_skimmer' ||
+          s.mode === 'lexical_anchor' ||
+          s.mode === 'saccade_rail'
+      )
+    ) {
       unlocked.add('TIME_COMPRESSOR');
     }
     const passedModes = new Set(passedSessions.map((s) => s.mode));
-    if (
-      passedModes.has('chunk_pacer') &&
-      passedModes.has('rsvp') &&
-      passedModes.has('tachistoscope')
-    ) {
+    if (passedModes.size >= 3) {
       unlocked.add('TRI_ENGINE_PILOT');
     }
     if (
@@ -479,7 +482,12 @@ export async function recordSessionAndUpdateProfile(
   if (quizPassed && session.mode === 'rsvp' && session.effectiveWpm >= 220) {
     grant('ORP_LOCKED');
   }
-  if (quizPassed && session.mode === 'overclock_432') {
+  if (
+    quizPassed &&
+    (session.mode === 'syntax_skimmer' ||
+      session.mode === 'lexical_anchor' ||
+      session.mode === 'saccade_rail')
+  ) {
     grant('TIME_COMPRESSOR');
   }
   if (!isCalibration && nextStageCompleted >= 3) {
@@ -514,11 +522,7 @@ export async function recordSessionAndUpdateProfile(
       grant('RENAISSANCE_SYNAPSE');
     }
     const passedModes = new Set(passedList.map((s) => s.mode));
-    if (
-      passedModes.has('chunk_pacer') &&
-      passedModes.has('rsvp') &&
-      passedModes.has('tachistoscope')
-    ) {
+    if (passedModes.size >= 3) {
       grant('TRI_ENGINE_PILOT');
     }
   }

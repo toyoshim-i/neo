@@ -200,16 +200,16 @@ export function HomeScreen({
         tag={appMode === 'guided' ? 'COACH PRESCRIPTION' : 'TRAINING CONFIG'}
         title={
           appMode === 'guided'
-            ? 'ADAPTIVE 3-MODE ROTATION & SPEED (ADJUSTABLE)'
+            ? 'ADAPTIVE 6-ENGINE ESL ROTATION & SPEED'
             : 'TRAINING MODE & SPEED'
         }
       >
-        <div className="p-5 space-y-5">
+        <div className="p-5 space-y-4">
           {appMode === 'guided' &&
             (() => {
               const rec = profile.passageRecords?.[selectedPassage.id];
               return (
-                <div className="p-3.5 bg-[#0D0618] border border-[#00F5D4]/40 space-y-2.5">
+                <div className="p-3.5 bg-[#0D0618] border border-[#00F5D4]/40 space-y-1.5">
                   <div className="flex flex-wrap items-center justify-between gap-2 font-terminal text-xs">
                     <span className="text-[#00F5D4] font-bold">
                       TARGET AXIS // {coachPrescription.bottleneckLabel}
@@ -223,64 +223,17 @@ export function HomeScreen({
                   <p className="text-[11px] text-[#F2F5F8]/90 leading-relaxed">
                     {coachPrescription.rationale}
                   </p>
-                  <div className="grid grid-cols-3 gap-1.5 font-terminal text-[10px] pt-0.5">
-                    {(
-                      [
-                        {
-                          mode: 'chunk_pacer',
-                          label: '01 // CHUNK PACER',
-                          sub: 'FLOW & SYNC',
-                        },
-                        {
-                          mode: 'rsvp',
-                          label: '02 // RSVP STREAM',
-                          sub: 'ORP THROUGHPUT',
-                        },
-                        {
-                          mode: 'tachistoscope',
-                          label: '03 // TACHISTOSCOPE',
-                          sub: 'FLASH SPAN',
-                        },
-                      ] as const
-                    ).map((item) => {
-                      const isPrescribed =
-                        coachPrescription.nextMode === item.mode;
-                      const isSelected = selectedMode === item.mode;
-                      return (
-                        <button
-                          key={item.mode}
-                          type="button"
-                          onClick={() => {
-                            soundEngine.playUiClick();
-                            setSelectedMode(item.mode);
-                          }}
-                          className={`p-2 border text-center transition-all cursor-pointer ${
-                            isSelected
-                              ? 'border-[#00F5D4] bg-[#00F5D4]/15 text-[#00F5D4] font-bold'
-                              : isPrescribed
-                              ? 'border-[#FFE600]/70 bg-[#180B29] text-[#FFE600]'
-                              : 'border-[#6C7A89]/30 bg-[#0D0618] text-[#6C7A89] hover:text-[#F2F5F8]'
-                          }`}
-                        >
-                          <div>
-                            {isPrescribed ? '★ ' : ''}
-                            {item.label}
-                          </div>
-                          <div className="text-[9px] opacity-80 mt-0.5">
-                            {item.sub}
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
                 </div>
               );
             })()}
 
-          {/* 4 Core Mode Selector Tabs */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-            {(Object.keys(MODE_INFO) as TrainingMode[]).map((modeKey) => {
+          {/* Unified 6 Complementary ESL Mode Cards */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 font-terminal">
+            {(Object.keys(MODE_INFO) as TrainingMode[]).map((modeKey, idx) => {
               const active = selectedMode === modeKey;
+              const isPrescribed =
+                appMode === 'guided' && coachPrescription.nextMode === modeKey;
+              const numPrefix = String(idx + 1).padStart(2, '0');
               return (
                 <button
                   key={modeKey}
@@ -289,13 +242,27 @@ export function HomeScreen({
                     soundEngine.playUiClick();
                     setSelectedMode(modeKey);
                   }}
-                  className={`cyber-btn py-2.5 px-2 border text-[11px] font-bold text-center transition-all ${
+                  className={`p-2.5 border text-left transition-all cursor-pointer relative ${
                     active
-                      ? 'bg-[#00F5D4] text-[#0D0618] border-[#00F5D4]'
-                      : 'bg-[#0D0618] text-[#6C7A89] border-[#6C7A89]/40 hover:border-[#00F5D4]/60 hover:text-[#F2F5F8]'
+                      ? 'bg-[#00F5D4]/15 border-[#00F5D4] text-[#00F5D4]'
+                      : isPrescribed
+                      ? 'bg-[#180B29] border-[#FFE600]/80 text-[#FFE600]'
+                      : 'bg-[#0D0618] border-[#6C7A89]/35 text-[#6C7A89] hover:border-[#00F5D4]/60 hover:text-[#F2F5F8]'
                   }`}
                 >
-                  {MODE_INFO[modeKey].label}
+                  <div className="flex items-center justify-between gap-1 text-[11px] font-bold">
+                    <span className="truncate">
+                      {numPrefix} // {MODE_INFO[modeKey].label}
+                    </span>
+                    {isPrescribed && (
+                      <span className="px-1 py-0.2 bg-[#FFE600] text-[#0D0618] text-[9px] font-extrabold shrink-0">
+                        ★ PICK
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-[9px] opacity-80 mt-0.5 truncate">
+                    {MODE_INFO[modeKey].shortTag}
+                  </div>
                 </button>
               );
             })}

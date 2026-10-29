@@ -54,7 +54,8 @@ export function TitleScreen({
           <div className="p-5 space-y-4">
             <p className="text-xs sm:text-sm text-[#F2F5F8] leading-relaxed">
               Diagnoses your 5-axis reading telemetry after every session and
-              dynamically rotates the optimal engine while ramping up WPM:
+              dynamically rotates 6 complementary ESL training engines while
+              ramping up WPM:
             </p>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 font-terminal text-[11px]">
               <div className="p-2.5 bg-[#0D0618] border border-[#00F5D4]/30">
@@ -62,23 +63,47 @@ export function TitleScreen({
                   01 // CHUNK PACER
                 </div>
                 <div className="text-[#6C7A89] mt-0.5">
-                  Targets semantic sync &amp; forward flow (anti-regression).
+                  Forward semantic flow &amp; anti-regression fade.
+                </div>
+              </div>
+              <div className="p-2.5 bg-[#0D0618] border border-[#00F5D4]/30">
+                <div className="text-[#00F5D4] font-bold">
+                  02 // SYNTAX SKIMMER
+                </div>
+                <div className="text-[#6C7A89] mt-0.5">
+                  Dims function words to isolate S-V-O &amp; logic markers.
                 </div>
               </div>
               <div className="p-2.5 bg-[#0D0618] border border-[#00F5D4]/30">
                 <div className="text-[#FFE600] font-bold">
-                  02 // RSVP STREAM
+                  03 // LEXICAL ANCHOR
                 </div>
                 <div className="text-[#6C7A89] mt-0.5">
-                  Locks ORP reticle to suppress inner speech &amp; boost WPM.
+                  Highlights leading word roots for instant lexical prediction.
+                </div>
+              </div>
+              <div className="p-2.5 bg-[#0D0618] border border-[#00F5D4]/30">
+                <div className="text-[#FFE600] font-bold">
+                  04 // SACCADE RAIL
+                </div>
+                <div className="text-[#6C7A89] mt-0.5">
+                  3-column fixation rails for rhythmic horizontal eye jumps.
                 </div>
               </div>
               <div className="p-2.5 bg-[#0D0618] border border-[#00F5D4]/30">
                 <div className="text-[#FF1E7A] font-bold">
-                  03 // TACHISTOSCOPE
+                  05 // RSVP STREAM
                 </div>
                 <div className="text-[#6C7A89] mt-0.5">
-                  Flashes peripheral chunks to compress fixation latency.
+                  Center ORP reticle stream to suppress inner speech.
+                </div>
+              </div>
+              <div className="p-2.5 bg-[#0D0618] border border-[#00F5D4]/30">
+                <div className="text-[#FF1E7A] font-bold">
+                  06 // TACHISTOSCOPE
+                </div>
+                <div className="text-[#6C7A89] mt-0.5">
+                  140–250ms peripheral flashes to expand visual span.
                 </div>
               </div>
             </div>
@@ -130,9 +155,9 @@ export function TitleScreen({
         >
           <div className="p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <p className="text-xs text-[#6C7A89] leading-relaxed">
-              Unrestricted access to all 4 training engines (Chunk Pacer, RSVP
-              Stream, 4/3/2 Overclock, Tachistoscope), manual WPM sliders, and
-              live article feeds.
+              Unrestricted manual access to all 6 ESL training engines (Chunk
+              Pacer, Syntax Skimmer, Lexical Anchor, Saccade Rail, RSVP Stream,
+              Tachistoscope), custom WPM sliders, and live article feeds.
             </p>
             <button
               type="button"

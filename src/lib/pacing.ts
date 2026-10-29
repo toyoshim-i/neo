@@ -14,25 +14,41 @@ export type PassageModalTab = 'presets' | 'live' | 'custom';
 
 export const MODE_INFO: Record<
   TrainingMode,
-  { label: string; shortDesc: string }
+  { label: string; shortTag: string; shortDesc: string }
 > = {
   chunk_pacer: {
     label: 'CHUNK PACER',
+    shortTag: 'FLOW & ANTI-REGRESSION',
     shortDesc:
-      'Full paragraph view with auto-advancing 2–4 word semantic highlights.',
+      'Full paragraph view with auto-advancing 2–4 word semantic highlights and anti-regression fade.',
+  },
+  syntax_skimmer: {
+    label: 'SYNTAX SKIMMER',
+    shortTag: 'S-V-O & LOGIC SKELETON',
+    shortDesc:
+      'Dims low-cost function words so content words (nouns/verbs) and discourse markers pop out as a structural skeleton.',
+  },
+  lexical_anchor: {
+    label: 'LEXICAL ANCHOR',
+    shortTag: 'WORD-INITIAL PREDICTION',
+    shortDesc:
+      'Emphasizes the leading root letters of content words so your brain predicts whole words without spelling out suffixes.',
+  },
+  saccade_rail: {
+    label: 'SACCADE RAIL',
+    shortTag: '3-COLUMN RHYTHMIC JUMP',
+    shortDesc:
+      'Aligns chunks onto 3 fixed horizontal fixation rails (Left · Center · Right) to train rhythmic saccades and return sweeps.',
   },
   rsvp: {
     label: 'RSVP STREAM',
+    shortTag: 'SUBVOCAL SUPPRESSION',
     shortDesc:
-      'Lock your gaze at the center ORP reticle as chunks flash sequentially.',
-  },
-  overclock_432: {
-    label: '4/3/2 OVERCLOCK',
-    shortDesc:
-      'Read the same passage across 3 passes at 100% → 75% → 50% time compression.',
+      'Lock your gaze at the center ORP reticle as chunks stream sequentially to bypass inner speech.',
   },
   tachistoscope: {
     label: 'TACHISTOSCOPE',
+    shortTag: 'PERIPHERAL FLASH SPAN',
     shortDesc:
       'Flash 3–4 word phrases for ~170ms to train parallel parafoveal recognition.',
   },

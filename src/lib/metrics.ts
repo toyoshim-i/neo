@@ -112,21 +112,21 @@ export function calculateHumanBenchmark(
     'Maintain semantic chunk pacing to stabilize forward reading rhythm.';
 
   if (weakestAxis === 'fixationMs') {
-    recommendedMode = 'tachistoscope';
+    recommendedMode = 'lexical_anchor';
     diagnosisText =
-      'Bottleneck: Fixation speed. Use TACHISTOSCOPE FLASH to compress per-chunk recognition time.';
+      'Bottleneck: Fixation speed. Use LEXICAL ANCHOR or TACHISTOSCOPE to recognize words from leading root anchors.';
   } else if (weakestAxis === 'perceptualSpan') {
     recommendedMode = 'tachistoscope';
     diagnosisText =
       'Bottleneck: Perceptual span. Use TACHISTOSCOPE FLASH to expand multi-word peripheral intake.';
   } else if (weakestAxis === 'forwardFlowRate') {
-    recommendedMode = 'chunk_pacer';
+    recommendedMode = 'saccade_rail';
     diagnosisText =
-      'Bottleneck: Regression rate. Use CHUNK PACER with Fade-Out enabled to eliminate backward saccades.';
+      'Bottleneck: Forward gaze rhythm. Use SACCADE RAIL or CHUNK PACER to lock in steady left-to-right saccades.';
   } else if (weakestAxis === 'syncRate') {
-    recommendedMode = 'chunk_pacer';
+    recommendedMode = 'syntax_skimmer';
     diagnosisText =
-      'Bottleneck: Semantic retention. Consolidate comprehension in CHUNK PACER before pushing clock rate.';
+      'Bottleneck: Structural comprehension. Use SYNTAX SKIMMER to isolate S-V-O content words and discourse markers.';
   } else {
     recommendedMode = 'rsvp';
     diagnosisText =
@@ -145,7 +145,7 @@ export function calculateHumanBenchmark(
   };
 }
 
-export type CoachRotationMode = 'chunk_pacer' | 'rsvp' | 'tachistoscope';
+export type CoachRotationMode = TrainingMode;
 
 export interface CoachPrescription {
   nextMode: CoachRotationMode;
@@ -157,9 +157,9 @@ export interface CoachPrescription {
 }
 
 /**
- * Selects the optimal next mode among the 3 core training engines
- * (`chunk_pacer`, `rsvp`, `tachistoscope`) by analyzing the user's
- * 5-axis weakness telemetry and enforcing anti-stagnation rotation.
+ * Selects the optimal next mode among all 6 complementary ESL training engines
+ * (`chunk_pacer`, `syntax_skimmer`, `lexical_anchor`, `saccade_rail`, `rsvp`, `tachistoscope`)
+ * by analyzing the user's 5-axis weakness telemetry and enforcing anti-stagnation rotation.
  */
 export function computeGuidedCoachPrescription(params: {
   lastMetrics: FiveAxisMetrics | null;
@@ -174,7 +174,7 @@ export function computeGuidedCoachPrescription(params: {
       weakestAxis: 'effectiveWpm',
       bottleneckLabel: 'INITIAL RHYTHM CALIBRATION',
       rationale:
-        'Start with CHUNK PACER to establish semantic chunking rhythm before rotating into RSVP and Tachistoscope.',
+        'Start with CHUNK PACER to establish semantic chunking rhythm before rotating across all 6 ESL training engines.',
       axisScores: {
         effectiveWpm: 50,
         fixationMs: 50,
@@ -194,25 +194,29 @@ export function computeGuidedCoachPrescription(params: {
   };
 
   const lastMode = recentModes[0] || null;
-  const prevMode = recentModes[1] || null;
 
-  // If comprehension dropped below 65%, consolidate in CHUNK PACER first
-  if (lastMetrics.syncRate < 0.65 && lastMode !== 'chunk_pacer') {
+  // If comprehension dropped below 65%, consolidate in SYNTAX SKIMMER or CHUNK PACER first
+  if (
+    lastMetrics.syncRate < 0.65 &&
+    lastMode !== 'syntax_skimmer' &&
+    lastMode !== 'chunk_pacer'
+  ) {
+    const recoveryMode: CoachRotationMode =
+      recentModes.includes('syntax_skimmer') ? 'chunk_pacer' : 'syntax_skimmer';
     return {
-      nextMode: 'chunk_pacer',
+      nextMode: recoveryMode,
       fadeOutPassed: lastMetrics.forwardFlowRate < 0.9,
       weakestAxis: 'syncRate',
-      bottleneckLabel: 'SEMANTIC SYNC RECOVERY',
+      bottleneckLabel: 'STRUCTURAL SYNC RECOVERY',
       rationale:
-        'Comprehension dipped below threshold — rotating to CHUNK PACER to stabilize meaning retention.',
+        recoveryMode === 'syntax_skimmer'
+          ? 'Comprehension dipped below threshold — rotating to SYNTAX SKIMMER to highlight content-word S-V-O structure and discourse markers.'
+          : 'Comprehension dipped below threshold — rotating to CHUNK PACER to stabilize meaning retention.',
       axisScores,
     };
   }
 
-  // Evaluate weakness need (lower score = higher priority) for each of the 3 modes:
-  // - chunk_pacer targets Forward Flow (regressions) & Comprehension Sync
-  // - rsvp targets Effective Throughput (subvocalization suppression) & Saccade Elimination
-  // - tachistoscope targets Fixation Speed (ms/chunk) & Perceptual Span (words/chunk)
+  // Evaluate weakness need (lower score = higher priority) across all 6 complementary ESL modes:
   const candidates: Array<{
     mode: CoachRotationMode;
     score: number;
@@ -222,25 +226,51 @@ export function computeGuidedCoachPrescription(params: {
   }> = [
     {
       mode: 'chunk_pacer',
-      score: Math.min(axisScores.forwardFlowRate, axisScores.syncRate),
-      weakestAxis:
-        axisScores.forwardFlowRate <= axisScores.syncRate
-          ? 'forwardFlowRate'
-          : 'syncRate',
-      bottleneckLabel:
-        axisScores.forwardFlowRate <= axisScores.syncRate
-          ? 'FORWARD GAZE FLOW (ANTI-REGRESSION)'
-          : 'SEMANTIC COMPREHENSION SYNC',
+      score: Math.round(
+        axisScores.forwardFlowRate * 0.6 + axisScores.syncRate * 0.4
+      ),
+      weakestAxis: 'forwardFlowRate',
+      bottleneckLabel: 'FORWARD GAZE FLOW (ANTI-REGRESSION)',
       rationale:
-        axisScores.forwardFlowRate <= axisScores.syncRate
-          ? 'CHUNK PACER (with Fade-Out) trains steady left-to-right saccades without look-backs.'
-          : 'CHUNK PACER reinforces full-paragraph syntactic comprehension at your new clock speed.',
+        'CHUNK PACER (with Fade-Out) trains steady left-to-right semantic chunk intake without look-backs.',
+    },
+    {
+      mode: 'syntax_skimmer',
+      score: Math.round(
+        axisScores.syncRate * 0.7 + axisScores.effectiveWpm * 0.3
+      ),
+      weakestAxis: 'syncRate',
+      bottleneckLabel: 'SYNTACTIC SKELETON & DISCOURSE LOGIC',
+      rationale:
+        'SYNTAX SKIMMER dims low-cost function words so nouns, main verbs, and contrast markers jump out immediately.',
+    },
+    {
+      mode: 'lexical_anchor',
+      score: Math.round(
+        axisScores.fixationMs * 0.65 + axisScores.effectiveWpm * 0.35
+      ),
+      weakestAxis: 'fixationMs',
+      bottleneckLabel: 'WORD-INITIAL LEXICAL PREDICTION',
+      rationale:
+        'LEXICAL ANCHOR highlights leading root characters so you recognize long words instantly without spelling out suffixes.',
+    },
+    {
+      mode: 'saccade_rail',
+      score: Math.round(
+        axisScores.forwardFlowRate * 0.5 + axisScores.perceptualSpan * 0.5
+      ),
+      weakestAxis:
+        axisScores.forwardFlowRate <= axisScores.perceptualSpan
+          ? 'forwardFlowRate'
+          : 'perceptualSpan',
+      bottleneckLabel: '3-RAIL SACCADIC CADENCE & RETURN SWEEP',
+      rationale:
+        'SACCADE RAIL aligns phrases onto 3 fixed horizontal landing rails to build automatic 3-beat eye jumps across each line.',
     },
     {
       mode: 'rsvp',
-      score: Math.min(
-        axisScores.effectiveWpm,
-        Math.round((axisScores.effectiveWpm + axisScores.forwardFlowRate) / 2)
+      score: Math.round(
+        axisScores.effectiveWpm * 0.75 + axisScores.forwardFlowRate * 0.25
       ),
       weakestAxis: 'effectiveWpm',
       bottleneckLabel: 'SUBVOCALIZATION & SACCADE CEILING',
@@ -249,32 +279,29 @@ export function computeGuidedCoachPrescription(params: {
     },
     {
       mode: 'tachistoscope',
-      score: Math.min(axisScores.fixationMs, axisScores.perceptualSpan),
+      score: Math.round(
+        axisScores.perceptualSpan * 0.6 + axisScores.fixationMs * 0.4
+      ),
       weakestAxis:
-        axisScores.fixationMs <= axisScores.perceptualSpan
-          ? 'fixationMs'
-          : 'perceptualSpan',
-      bottleneckLabel:
-        axisScores.fixationMs <= axisScores.perceptualSpan
-          ? 'FOVEAL FIXATION DURATION'
-          : 'PERIPHERAL VISUAL SPAN',
+        axisScores.perceptualSpan <= axisScores.fixationMs
+          ? 'perceptualSpan'
+          : 'fixationMs',
+      bottleneckLabel: 'PERIPHERAL SNAPSHOT SPAN',
       rationale:
-        axisScores.fixationMs <= axisScores.perceptualSpan
-          ? 'TACHISTOSCOPE flashes chunks briefly (140–250ms) to compress visual recognition latency.'
-          : 'TACHISTOSCOPE trains peripheral snapshot intake so you absorb 3–4 words in a single glance.',
+        'TACHISTOSCOPE flashes chunks briefly (140–250ms) so you absorb 3–4 words in a single peripheral glance.',
     },
   ];
 
-  // Apply rotation penalties so Coach actively rotates across all 3 engines:
+  // Apply recency penalties so Coach rotates smoothly across all 6 engines:
   // - Never repeat `lastMode` back-to-back (+1000 penalty)
-  // - Gently penalize `prevMode` (+14 penalty) so the 3rd unplayed mode is favored when axis scores are close
+  // - Penalize recently played modes in decaying order so all 6 modes see active rotation
+  const recencyPenalties = [1000, 26, 16, 10, 5];
   const scoredCandidates = candidates
     .map((c) => {
       let effectiveScore = c.score;
-      if (c.mode === lastMode) {
-        effectiveScore += 1000;
-      } else if (c.mode === prevMode) {
-        effectiveScore += 14;
+      const recencyIdx = recentModes.indexOf(c.mode);
+      if (recencyIdx !== -1 && recencyIdx < recencyPenalties.length) {
+        effectiveScore += recencyPenalties[recencyIdx];
       }
       return { ...c, effectiveScore };
     })
@@ -282,7 +309,10 @@ export function computeGuidedCoachPrescription(params: {
 
   const chosen = scoredCandidates[0];
   const fadeOutPassed =
-    chosen.mode === 'chunk_pacer'
+    chosen.mode === 'chunk_pacer' ||
+    chosen.mode === 'syntax_skimmer' ||
+    chosen.mode === 'lexical_anchor' ||
+    chosen.mode === 'saccade_rail'
       ? lastMetrics.forwardFlowRate < 0.94 || recentModes.length >= 1
       : true;
 

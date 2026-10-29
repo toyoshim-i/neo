@@ -9,8 +9,10 @@ export type PassageSourceType =
 
 export type TrainingMode =
   | 'chunk_pacer'
+  | 'syntax_skimmer'
+  | 'lexical_anchor'
+  | 'saccade_rail'
   | 'rsvp'
-  | 'overclock_432'
   | 'tachistoscope';
 
 export type AchievementId =

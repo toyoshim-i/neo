@@ -162,7 +162,6 @@ export function App() {
   // Active Reading Session State
   const [activeChunkIndex, setActiveChunkIndex] = useState<number>(0);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
-  const [overclockPass, setOverclockPass] = useState<1 | 2 | 3>(1);
   const [regressionCount, setRegressionCount] = useState<number>(0);
   const [totalSteps, setTotalSteps] = useState<number>(0);
   const [sessionResetKey, setSessionResetKey] = useState<number>(0);
@@ -344,11 +343,11 @@ export function App() {
     ? CALIBRATION_PASSAGE
     : allPassages.find((p) => p.id === selectedPassageId) || PRESET_PASSAGES[0];
 
-  // Compute Weakness-Driven 3-Mode Coach Prescription (`chunk_pacer` / `rsvp` / `tachistoscope`)
+  // Compute Weakness-Driven 6-Engine ESL Coach Prescription
   const latestMetricsForCoach =
     lastSessionMetrics ||
     (sessionHistory[0] ? summarizeSessionMetrics(sessionHistory[0]) : null);
-  const recentModesForCoach = sessionHistory.slice(0, 4).map((s) => s.mode);
+  const recentModesForCoach = sessionHistory.slice(0, 5).map((s) => s.mode);
   const coachPrescription = computeGuidedCoachPrescription({
     lastMetrics: latestMetricsForCoach,
     recentModes: recentModesForCoach,
@@ -442,15 +441,8 @@ export function App() {
     }
   }, [activeChunkIndex, calibrationStartMs]);
 
-  // Effective WPM during reading (accounts for 4/3/2 Overclock pass multiplier)
-  const activeWpm =
-    selectedMode === 'overclock_432'
-      ? overclockPass === 1
-        ? targetWpm
-        : overclockPass === 2
-        ? Math.round(targetWpm / 0.75)
-        : Math.round(targetWpm / 0.5)
-      : targetWpm;
+  // Effective WPM during reading
+  const activeWpm = targetWpm;
 
   const estimatedSeconds = Math.max(
     10,
@@ -466,7 +458,6 @@ export function App() {
   const startReadingSession = () => {
     soundEngine.playUiClick();
     setActiveChunkIndex(0);
-    setOverclockPass(1);
     setRegressionCount(0);
     setTotalSteps(0);
     setSessionResetKey((k) => k + 1);
@@ -787,12 +778,6 @@ export function App() {
         const isMarker =
           selectedPassage.discourseMarkerIndices.includes(nextIdx);
         soundEngine.playChunkTick(isMarker);
-      } else if (selectedMode === 'overclock_432' && overclockPass < 3) {
-        const nextPass = (overclockPass + 1) as 2 | 3;
-        soundEngine.playPassTransition(nextPass);
-        setOverclockPass(nextPass);
-        setActiveChunkIndex(0);
-        setSessionResetKey((k) => k + 1);
       } else {
         soundEngine.playPassTransition(3);
         startQuizPhase();
@@ -807,7 +792,6 @@ export function App() {
     activeWpm,
     selectedPassage,
     selectedMode,
-    overclockPass,
     startQuizPhase,
   ]);
 
@@ -1242,7 +1226,6 @@ export function App() {
           activeWpm={activeWpm}
           activeChunkIndex={activeChunkIndex}
           setActiveChunkIndex={setActiveChunkIndex}
-          overclockPass={overclockPass}
           isPlaying={isPlaying}
           fadeOutPassed={fadeOutPassed}
           sessionResetKey={sessionResetKey}
