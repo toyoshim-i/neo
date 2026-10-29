@@ -48,14 +48,8 @@ export function saveLlmProviderSelection(provider: LlmProviderType): void {
 
 export type WebLlmModelId =
   | 'bonsai-1.7b-q1'
-  | 'ternary-bonsai-1.7b-pq2'
-  | 'bonsai-2-2b-ptq1'
   | 'bonsai-2-2b-pq2'
-  | 'bonsai-4b-q1'
-  | 'ternary-bonsai-4b-pq2'
-  | 'bonsai-2-4b-ptq1'
-  | 'bonsai-2-4b-pq2'
-  | 'bonsai-8b-q1';
+  | 'bonsai-2-4b-pq2';
 
 export interface WebGpuModelOption {
   id: WebLlmModelId;
@@ -69,65 +63,23 @@ export const WEBLLM_MODEL_OPTIONS: WebGpuModelOption[] = [
   {
     id: 'bonsai-1.7b-q1',
     url: 'https://huggingface.co/prism-ml/Bonsai-1.7B-gguf/resolve/main/Bonsai-1.7B-Q1_0.gguf',
-    label: 'BONSAI 1.7B // Q1_0 (1-BIT)',
-    vram: '237 MiB',
-    desc: 'Ultra-light 1-bit (Qwen3-1.7B) — 51.0 tok/s on iPhone',
-  },
-  {
-    id: 'ternary-bonsai-1.7b-pq2',
-    url: 'https://huggingface.co/prism-ml/Ternary-Bonsai-1.7B-gguf/resolve/main/Ternary-Bonsai-1.7B-PQ2_0.gguf',
-    label: 'TERNARY BONSAI 1.7B // PQ2_0',
-    vram: '420 MiB',
-    desc: 'Ternary PQ2_0 (Qwen3-1.7B) — 42.0 tok/s on iPhone',
-  },
-  {
-    id: 'bonsai-2-2b-ptq1',
-    url: 'https://huggingface.co/prism-ml/Ternary-Bonsai-2-2B-gguf/resolve/main/Ternary-Bonsai-2-2B-PTQ1_0.gguf',
-    label: 'BONSAI 2 2B // PTQ1_0 (1.58-BIT)',
-    vram: '406 MiB',
-    desc: 'Ternary PTQ1_0 + FWHT (Qwen3.5-2B) — 25.4 tok/s on iPhone',
+    label: 'LITE // BONSAI 1.7B',
+    vram: '237 MB',
+    desc: 'Lightweight & fast',
   },
   {
     id: 'bonsai-2-2b-pq2',
     url: 'https://huggingface.co/prism-ml/Ternary-Bonsai-2-2B-gguf/resolve/main/Ternary-Bonsai-2-2B-PQ2_0.gguf',
-    label: 'BONSAI 2 2B // PQ2_0 (TERNARY)',
-    vram: '495 MiB',
-    desc: 'Fast Ternary PQ2_0 + FWHT (Qwen3.5-2B) — 44.2 tok/s on iPhone',
-  },
-  {
-    id: 'bonsai-4b-q1',
-    url: 'https://huggingface.co/prism-ml/Bonsai-4B-gguf/resolve/main/Bonsai-4B-Q1_0.gguf',
-    label: 'BONSAI 4B // Q1_0 (1-BIT)',
-    vram: '546 MiB',
-    desc: 'Compact 4B 1-bit (Qwen3-4B) — 30.7 tok/s on iPhone',
-  },
-  {
-    id: 'ternary-bonsai-4b-pq2',
-    url: 'https://huggingface.co/prism-ml/Ternary-Bonsai-4B-gguf/resolve/main/Ternary-Bonsai-4B-PQ2_0.gguf',
-    label: 'TERNARY BONSAI 4B // PQ2_0',
-    vram: '1,025 MiB',
-    desc: 'Ternary PQ2_0 (Qwen3-4B) — 28.9 tok/s on iPhone',
-  },
-  {
-    id: 'bonsai-2-4b-ptq1',
-    url: 'https://huggingface.co/prism-ml/Ternary-Bonsai-2-4B-gguf/resolve/main/Ternary-Bonsai-2-4B-PTQ1_0.gguf',
-    label: 'BONSAI 2 4B // PTQ1_0 (1.58-BIT)',
-    vram: '902 MiB',
-    desc: '4B Ternary PTQ1_0 + FWHT (Qwen3.5-4B) — 13.3 tok/s on iPhone',
+    label: 'STANDARD // BONSAI 2 2B',
+    vram: '495 MB',
+    desc: 'Balanced quality (Recommended)',
   },
   {
     id: 'bonsai-2-4b-pq2',
     url: 'https://huggingface.co/prism-ml/Ternary-Bonsai-2-4B-gguf/resolve/main/Ternary-Bonsai-2-4B-PQ2_0.gguf',
-    label: 'BONSAI 2 4B // PQ2_0 (TERNARY)',
-    vram: '1,093 MiB',
-    desc: 'Flagship 4B Ternary PQ2_0 + FWHT (Qwen3.5-4B) — 20.6 tok/s on iPhone',
-  },
-  {
-    id: 'bonsai-8b-q1',
-    url: 'https://huggingface.co/prism-ml/Bonsai-8B-gguf/resolve/main/Bonsai-8B-Q1_0.gguf',
-    label: 'BONSAI 8B // Q1_0 (1-BIT)',
-    vram: '1,100 MiB',
-    desc: '8B 1-bit GGUF (Qwen3-8B) — 26.4 tok/s on iPhone',
+    label: 'HIGH QUALITY // BONSAI 2 4B',
+    vram: '1.09 GB',
+    desc: 'Best translation accuracy',
   },
 ];
 
@@ -145,7 +97,7 @@ export function getSavedWebLlmModel(): WebLlmModelId {
       return saved as WebLlmModelId;
     }
   }
-  return 'bonsai-2-2b-ptq1';
+  return 'bonsai-2-2b-pq2';
 }
 
 export function saveWebLlmModelSelection(modelId: WebLlmModelId): void {

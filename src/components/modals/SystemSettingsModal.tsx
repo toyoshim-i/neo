@@ -391,8 +391,8 @@ export function SystemSettingsModal({
                     </span>
                   </div>
 
-                  {/* WebGPU Model Selector (Bonsai 1 & 2 GGUF) */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                  {/* WebGPU Model Selector (3-Tier Bonsai Lineup) */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
                     {WEBLLM_MODEL_OPTIONS.map((m) => {
                       const active = selectedWebLlmModel === m.id;
                       const isCached = cachedModels[m.id];
