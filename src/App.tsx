@@ -76,6 +76,7 @@ import {
   MODE_INFO,
   shuffleQuizQuestions,
   computeChunkDurationMs,
+  buildSmoothedGhostWeights,
 } from './lib/pacing';
 import {
   LexiconPopupState,
@@ -159,12 +160,15 @@ export function App() {
     detail?: string;
   } | null>(null);
 
-  // Active Reading Session State
+  // Active Reading Session State (Double-Cursor: `activeChunkIndex` = Player, `ghostChunkIndex` = Ghost)
   const [activeChunkIndex, setActiveChunkIndex] = useState<number>(0);
+  const [ghostChunkIndex, setGhostChunkIndex] = useState<number>(0);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [regressionCount, setRegressionCount] = useState<number>(0);
   const [totalSteps, setTotalSteps] = useState<number>(0);
   const [sessionResetKey, setSessionResetKey] = useState<number>(0);
+  const chunkDurationsMsRef = useRef<number[]>([]);
+  const chunkStartTimeRef = useRef<number>(Date.now());
   const [previewCheckedIndices, setPreviewCheckedIndices] = useState<number[]>(
     []
   );
@@ -463,10 +467,15 @@ export function App() {
   const startReadingSession = () => {
     soundEngine.playUiClick();
     setActiveChunkIndex(0);
+    setGhostChunkIndex(0);
     setRegressionCount(0);
     setTotalSteps(0);
     setSessionResetKey((k) => k + 1);
     setLexiconPopup(null);
+    chunkDurationsMsRef.current = new Array(selectedPassage.chunks.length).fill(
+      0
+    );
+    chunkStartTimeRef.current = Date.now();
     setIsPlaying(true);
     setScreen('reading');
   };
@@ -608,6 +617,11 @@ export function App() {
 
   // Transition from Reading to Quiz
   const startQuizPhase = useCallback(() => {
+    if (isPlaying && activeChunkIndex < chunkDurationsMsRef.current.length) {
+      chunkDurationsMsRef.current[activeChunkIndex] =
+        (chunkDurationsMsRef.current[activeChunkIndex] || 0) +
+        Math.max(20, Date.now() - chunkStartTimeRef.current);
+    }
     setIsPlaying(false);
     setLexiconPopup(null);
     setActiveQuizQuestions(shuffleQuizQuestions(selectedPassage.questions));
@@ -618,7 +632,32 @@ export function App() {
     setLastResponseSec(null);
     questionStartTimeRef.current = Date.now();
     setScreen('quiz');
-  }, [selectedPassage.questions]);
+  }, [isPlaying, activeChunkIndex, selectedPassage.questions]);
+
+  const handleAdvanceReadingChunk = useCallback(() => {
+    const now = Date.now();
+    if (!isPlaying) {
+      setIsPlaying(true);
+      setLexiconPopup(null);
+      chunkStartTimeRef.current = now;
+    } else if (activeChunkIndex < chunkDurationsMsRef.current.length) {
+      chunkDurationsMsRef.current[activeChunkIndex] =
+        (chunkDurationsMsRef.current[activeChunkIndex] || 0) +
+        Math.max(20, now - chunkStartTimeRef.current);
+      chunkStartTimeRef.current = now;
+    }
+
+    if (activeChunkIndex < selectedPassage.chunks.length - 1) {
+      const nextIdx = activeChunkIndex + 1;
+      setActiveChunkIndex(nextIdx);
+      setTotalSteps((s) => s + 1);
+      const isMarker = selectedPassage.discourseMarkerIndices.includes(nextIdx);
+      soundEngine.playChunkTick(isMarker);
+    } else {
+      soundEngine.playPassTransition(3);
+      startQuizPhase();
+    }
+  }, [isPlaying, activeChunkIndex, selectedPassage, startQuizPhase]);
 
   // Finalize Session & Save to IndexedDB
   const finalizeSession = useCallback(
@@ -654,7 +693,6 @@ export function App() {
         return;
       }
 
-      const effectiveWpm = Math.round(targetWpm * syncRate);
       const avgWordsPerChunk =
         selectedPassage.chunks.length > 0
           ? Number(
@@ -663,9 +701,35 @@ export function App() {
               ).toFixed(1)
             )
           : 2.8;
+
+      // Measure actual reading WPM from player's recorded chunk durations (or Tachistoscope adaptive flashMs)
+      const totalRecordedMs = chunkDurationsMsRef.current.reduce(
+        (acc, ms) => acc + ms,
+        0
+      );
+      const completedMostChunks =
+        activeChunkIndex >= Math.floor(selectedPassage.chunks.length * 0.7);
+
+      let measuredRawWpm = targetWpm;
+      if (selectedMode === 'tachistoscope' && overrideFixationMs) {
+        measuredRawWpm = Math.max(
+          80,
+          Math.min(700, Math.round((avgWordsPerChunk / overrideFixationMs) * 60000))
+        );
+      } else if (completedMostChunks && totalRecordedMs >= 1500) {
+        measuredRawWpm = Math.max(
+          60,
+          Math.min(
+            900,
+            Math.round((selectedPassage.wordCount / totalRecordedMs) * 60000)
+          )
+        );
+      }
+
+      const effectiveWpm = Math.round(measuredRawWpm * syncRate);
       const fixationMs =
         overrideFixationMs ??
-        Math.round((avgWordsPerChunk / targetWpm) * 60000);
+        Math.round((avgWordsPerChunk / measuredRawWpm) * 60000);
       const forwardFlowRate =
         totalSteps > 0
           ? Math.max(0, (totalSteps - regressionCount) / totalSteps)
@@ -685,7 +749,7 @@ export function App() {
         timestamp: Date.now(),
         passageId: selectedPassage.id,
         mode: selectedMode,
-        rawWpm: targetWpm,
+        rawWpm: measuredRawWpm,
         syncRate,
         effectiveWpm,
         fixationMs,
@@ -693,6 +757,15 @@ export function App() {
         forwardFlowRate,
         synced: 0,
       };
+
+      const candidateGhostWeights =
+        selectedMode !== 'tachistoscope' && completedMostChunks
+          ? buildSmoothedGhostWeights(
+              selectedPassage.chunks,
+              chunkDurationsMsRef.current,
+              selectedMode
+            )
+          : undefined;
 
       let beatOverall = false;
       let beatPassage = false;
@@ -702,7 +775,8 @@ export function App() {
           log,
           selectedPassage.wordCount,
           targetWpm,
-          selectedPassage.category
+          selectedPassage.category,
+          candidateGhostWeights
         );
         setProfile(result.profile);
         beatOverall = result.isNewOverallBest;
@@ -716,8 +790,12 @@ export function App() {
         // Ignore DB error in private browsing
       }
 
+      const baseReferenceWpm =
+        selectedMode === 'tachistoscope'
+          ? measuredRawWpm
+          : Math.round((targetWpm + measuredRawWpm) / 2);
       const { nextWpm } = computeNextTargetWpm(
-        targetWpm,
+        baseReferenceWpm,
         syncRate,
         forwardFlowRate
       );
@@ -728,7 +806,7 @@ export function App() {
           lastMetrics: metrics,
           recentModes: [
             selectedMode,
-            ...sessionHistory.slice(0, 3).map((s) => s.mode),
+            ...sessionHistory.slice(0, 4).map((s) => s.mode),
           ],
         });
         setSelectedMode(nextRx.nextMode);
@@ -750,6 +828,7 @@ export function App() {
       measuredCalibrationRawWpm,
       targetWpm,
       selectedPassage,
+      activeChunkIndex,
       totalSteps,
       regressionCount,
       selectedMode,
@@ -757,7 +836,7 @@ export function App() {
     ]
   );
 
-  // Auto-advance timer during Reading Screen (for non-tachistoscope modes)
+  // Auto-advance GHOST cursor during Reading Screen (uses smoothed PB weights if available)
   useEffect(() => {
     if (
       screen !== 'reading' ||
@@ -767,25 +846,20 @@ export function App() {
       return;
     }
 
+    const customWeights =
+      profile.passageRecords?.[selectedPassage.id]?.bestChunkWeights;
     const intervalMs = computeChunkDurationMs(
       selectedPassage.chunks,
-      activeChunkIndex,
+      ghostChunkIndex,
       selectedPassage.wordCount,
       activeWpm,
-      selectedMode
+      selectedMode,
+      customWeights
     );
 
     const timer = window.setTimeout(() => {
-      if (activeChunkIndex < selectedPassage.chunks.length - 1) {
-        const nextIdx = activeChunkIndex + 1;
-        setActiveChunkIndex(nextIdx);
-        setTotalSteps((s) => s + 1);
-        const isMarker =
-          selectedPassage.discourseMarkerIndices.includes(nextIdx);
-        soundEngine.playChunkTick(isMarker);
-      } else {
-        soundEngine.playPassTransition(3);
-        startQuizPhase();
+      if (ghostChunkIndex < selectedPassage.chunks.length - 1) {
+        setGhostChunkIndex((g) => g + 1);
       }
     }, Math.max(65, intervalMs));
 
@@ -793,45 +867,49 @@ export function App() {
   }, [
     screen,
     isPlaying,
-    activeChunkIndex,
+    ghostChunkIndex,
     activeWpm,
     selectedPassage,
     selectedMode,
-    startQuizPhase,
+    profile.passageRecords,
   ]);
 
-  // Keyboard shortcuts during Reading Screen
+  // Keyboard shortcuts during Reading Screen (Space / Right / Enter = Advance Player Chunk)
   useEffect(() => {
     if (screen !== 'reading' || selectedMode === 'tachistoscope') return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.code === 'Space') {
+      if (
+        e.code === 'Space' ||
+        e.code === 'ArrowRight' ||
+        e.code === 'Enter'
+      ) {
+        e.preventDefault();
+        handleAdvanceReadingChunk();
+      } else if (e.code === 'KeyP') {
         e.preventDefault();
         soundEngine.playUiClick();
         setIsPlaying((p) => {
-          if (!p) setLexiconPopup(null);
+          const now = Date.now();
+          if (p && activeChunkIndex < chunkDurationsMsRef.current.length) {
+            chunkDurationsMsRef.current[activeChunkIndex] =
+              (chunkDurationsMsRef.current[activeChunkIndex] || 0) +
+              Math.max(20, now - chunkStartTimeRef.current);
+          } else {
+            chunkStartTimeRef.current = now;
+            setLexiconPopup(null);
+          }
           return !p;
         });
       } else if (e.code === 'Escape') {
         setLexiconPopup(null);
-      } else if (e.code === 'ArrowRight') {
-        e.preventDefault();
-        if (activeChunkIndex < selectedPassage.chunks.length - 1) {
-          const nextIdx = activeChunkIndex + 1;
-          setActiveChunkIndex(nextIdx);
-          setTotalSteps((s) => s + 1);
-          soundEngine.playChunkTick(
-            selectedPassage.discourseMarkerIndices.includes(nextIdx)
-          );
-        } else {
-          startQuizPhase();
-        }
       } else if (e.code === 'ArrowLeft') {
         e.preventDefault();
         if (activeChunkIndex > 0) {
           setActiveChunkIndex((i) => i - 1);
           setRegressionCount((r) => r + 1);
           setTotalSteps((s) => s + 1);
+          chunkStartTimeRef.current = Date.now();
           soundEngine.playChunkTick(false);
         }
       } else if (e.code === 'ArrowUp') {
@@ -849,7 +927,12 @@ export function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [screen, selectedMode, activeChunkIndex, selectedPassage, startQuizPhase]);
+  }, [
+    screen,
+    selectedMode,
+    activeChunkIndex,
+    handleAdvanceReadingChunk,
+  ]);
 
   // Keyboard shortcuts during Self-Paced Calibration
   useEffect(() => {
@@ -1230,7 +1313,9 @@ export function App() {
           setTargetWpm={setTargetWpm}
           activeWpm={activeWpm}
           activeChunkIndex={activeChunkIndex}
+          ghostChunkIndex={ghostChunkIndex}
           setActiveChunkIndex={setActiveChunkIndex}
+          onAdvanceChunk={handleAdvanceReadingChunk}
           isPlaying={isPlaying}
           fadeOutPassed={fadeOutPassed}
           sessionResetKey={sessionResetKey}
@@ -1241,7 +1326,15 @@ export function App() {
           }}
           onTogglePlayPause={() => {
             setIsPlaying((p) => {
-              if (!p) setLexiconPopup(null);
+              const now = Date.now();
+              if (p && activeChunkIndex < chunkDurationsMsRef.current.length) {
+                chunkDurationsMsRef.current[activeChunkIndex] =
+                  (chunkDurationsMsRef.current[activeChunkIndex] || 0) +
+                  Math.max(20, now - chunkStartTimeRef.current);
+              } else {
+                chunkStartTimeRef.current = now;
+                setLexiconPopup(null);
+              }
               return !p;
             });
           }}

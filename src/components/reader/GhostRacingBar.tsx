@@ -2,7 +2,9 @@ import React, { useEffect, useRef, useState } from 'react';
 import { soundEngine } from '../../lib/soundEngine';
 
 interface GhostRacingBarProps {
-  userProgress: number;       // 0 to 100
+  userProgress: number;       // 0 to 100 (Player click cursor)
+  ghostProgress: number;      // 0 to 100 (Target WPM Ghost cursor)
+  targetWpm: number;
   totalWords: number;
   bestEffectiveWpm: number;   // e.g. 280
   isPlaying: boolean;
@@ -11,20 +13,22 @@ interface GhostRacingBarProps {
 
 export const GhostRacingBar: React.FC<GhostRacingBarProps> = ({
   userProgress,
+  ghostProgress,
+  targetWpm,
   totalWords,
   bestEffectiveWpm,
   isPlaying,
   resetKey,
 }) => {
   const [elapsedMs, setElapsedMs] = useState<number>(0);
-  const [overtakeFlash, setOvertakeFlash] = useState<'AVG' | 'BEST' | null>(null);
-  const wasAheadOfAvg = useRef<boolean>(false);
+  const [overtakeFlash, setOvertakeFlash] = useState<'GHOST' | 'BEST' | null>(null);
+  const wasAheadOfGhost = useRef<boolean>(false);
   const wasAheadOfBest = useRef<boolean>(false);
 
   // Reset elapsed timer when session restarts or pass changes
   useEffect(() => {
     setElapsedMs(0);
-    wasAheadOfAvg.current = false;
+    wasAheadOfGhost.current = false;
     wasAheadOfBest.current = false;
   }, [resetKey]);
 
@@ -37,39 +41,31 @@ export const GhostRacingBar: React.FC<GhostRacingBarProps> = ({
     return () => window.clearInterval(id);
   }, [isPlaying]);
 
-  const humanAvgTotalMs = Math.max(1000, (totalWords / 238) * 60000);
   const hasPersonalBest = bestEffectiveWpm > 0;
-  const selfBestTotalMs = hasPersonalBest
-    ? Math.max(1000, (totalWords / bestEffectiveWpm) * 60000)
-    : Infinity;
-
-  const avgProgress = Math.min(100, (elapsedMs / humanAvgTotalMs) * 100);
-  const bestProgress = hasPersonalBest
-    ? Math.min(100, (elapsedMs / selfBestTotalMs) * 100)
-    : 0;
+  const refWpm = hasPersonalBest ? bestEffectiveWpm : 238;
+  const refTotalMs = Math.max(1000, (totalWords / refWpm) * 60000);
+  const bestProgress = Math.min(100, (elapsedMs / refTotalMs) * 100);
 
   // Check overtake events after first 8% of passage
   useEffect(() => {
     if (userProgress < 8 || elapsedMs < 1000) return;
 
-    const nowAheadAvg = userProgress > avgProgress;
-    if (nowAheadAvg && !wasAheadOfAvg.current && avgProgress > 5) {
+    const nowAheadGhost = userProgress > ghostProgress;
+    if (nowAheadGhost && !wasAheadOfGhost.current && ghostProgress > 5) {
       soundEngine.playOvertakeSpark();
-      setOvertakeFlash('AVG');
+      setOvertakeFlash('GHOST');
       window.setTimeout(() => setOvertakeFlash(null), 650);
     }
-    wasAheadOfAvg.current = nowAheadAvg;
+    wasAheadOfGhost.current = nowAheadGhost;
 
-    if (hasPersonalBest) {
-      const nowAheadBest = userProgress > bestProgress;
-      if (nowAheadBest && !wasAheadOfBest.current && bestProgress > 5) {
-        soundEngine.playOvertakeSpark();
-        setOvertakeFlash('BEST');
-        window.setTimeout(() => setOvertakeFlash(null), 650);
-      }
-      wasAheadOfBest.current = nowAheadBest;
+    const nowAheadBest = userProgress > bestProgress;
+    if (nowAheadBest && !wasAheadOfBest.current && bestProgress > 5) {
+      soundEngine.playOvertakeSpark();
+      setOvertakeFlash('BEST');
+      window.setTimeout(() => setOvertakeFlash(null), 650);
     }
-  }, [userProgress, avgProgress, bestProgress, elapsedMs, hasPersonalBest]);
+    wasAheadOfBest.current = nowAheadBest;
+  }, [userProgress, ghostProgress, bestProgress, elapsedMs]);
 
   return (
     <div
@@ -79,9 +75,11 @@ export const GhostRacingBar: React.FC<GhostRacingBarProps> = ({
           : 'border-[#00F5D4]/30'
       }`}
     >
-      {/* Track 1: USER (CYAN) */}
+      {/* Track 1: USER CURSOR (CYAN) */}
       <div className="flex items-center gap-2">
-        <span className="w-20 text-[#00F5D4] font-bold shrink-0">YOU</span>
+        <span className="w-24 text-[#00F5D4] font-bold shrink-0">
+          YOU (CLICK)
+        </span>
         <div className="flex-1 h-1.5 bg-[#0D0618] overflow-hidden relative">
           <div
             className={`h-full transition-all duration-100 ${
@@ -95,24 +93,26 @@ export const GhostRacingBar: React.FC<GhostRacingBarProps> = ({
         </span>
       </div>
 
-      {/* Track 2: HUMAN AVG 238 WPM (GRAY/WHITE) */}
+      {/* Track 2: TARGET WPM GHOST PACER (YELLOW) */}
       <div className="flex items-center gap-2">
-        <span className="w-20 text-[#6C7A89] shrink-0">AVG (238)</span>
+        <span className="w-24 text-[#FFE600] shrink-0">
+          GHOST ({targetWpm})
+        </span>
         <div className="flex-1 h-1 bg-[#0D0618] overflow-hidden">
           <div
-            className="h-full bg-[#F2F5F8]/50 transition-all duration-75"
-            style={{ width: `${avgProgress}%` }}
+            className="h-full bg-[#FFE600]/85 transition-all duration-100"
+            style={{ width: `${ghostProgress}%` }}
           />
         </div>
-        <span className="w-9 text-right text-[#6C7A89]">
-          {Math.round(avgProgress)}%
+        <span className="w-9 text-right text-[#FFE600]">
+          {Math.round(ghostProgress)}%
         </span>
       </div>
 
-      {/* Track 3: SELF BEST (MAGENTA) */}
+      {/* Track 3: SELF BEST OR NATIVE AVG (MAGENTA) */}
       <div className="flex items-center gap-2">
-        <span className="w-20 text-[#FF1E7A] shrink-0">
-          {hasPersonalBest ? `BEST (${bestEffectiveWpm})` : 'BEST (---)'}
+        <span className="w-24 text-[#FF1E7A] shrink-0">
+          {hasPersonalBest ? `BEST (${bestEffectiveWpm})` : 'AVG (238)'}
         </span>
         <div className="flex-1 h-1 bg-[#0D0618] overflow-hidden">
           <div

@@ -43,6 +43,7 @@ export interface PassageProgress {
   stageCompleted: 0 | 1 | 2 | 3; // 0=Unread, 1=Stage1(Chunk), 2=Stage2(Pacer), 3=Mastered(Overclock)
   attempts: number;
   updatedAt: number;
+  bestChunkWeights?: number[]; // Smoothed PB timing weights (blended 50/50 with ideal cognitive curve)
 }
 
 export interface QuizQuestion {

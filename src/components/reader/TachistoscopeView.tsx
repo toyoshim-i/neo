@@ -186,6 +186,38 @@ function buildPeripheralSpanOptions(
   return combined;
 }
 
+function renderFlashedOrpChunk(chunk: string) {
+  const trimmed = chunk.trim();
+  const cleanLength = trimmed.length;
+  if (cleanLength === 0) return null;
+
+  let pivotIdx = Math.max(
+    0,
+    Math.min(cleanLength - 1, Math.floor(cleanLength * 0.44))
+  );
+  if (trimmed[pivotIdx] === ' ') {
+    if (pivotIdx + 1 < cleanLength && trimmed[pivotIdx + 1] !== ' ') {
+      pivotIdx += 1;
+    } else if (pivotIdx - 1 >= 0 && trimmed[pivotIdx - 1] !== ' ') {
+      pivotIdx -= 1;
+    }
+  }
+
+  const before = trimmed.slice(0, pivotIdx);
+  const pivot = trimmed.charAt(pivotIdx);
+  const after = trimmed.slice(pivotIdx + 1);
+
+  return (
+    <div className="text-lg sm:text-xl font-medium tracking-normal select-none w-full grid grid-cols-[1fr_auto_1fr] items-baseline overflow-hidden">
+      <span className="text-[#00F5D4] text-right whitespace-pre">{before}</span>
+      <span className="text-[#FF1E7A] font-bold border-b-2 border-[#FF1E7A] pb-0.5 whitespace-pre">
+        {pivot}
+      </span>
+      <span className="text-[#00F5D4] text-left whitespace-pre">{after}</span>
+    </div>
+  );
+}
+
 export const TachistoscopeView: React.FC<TachistoscopeViewProps> = ({
   passage,
   targetWpm,
@@ -194,35 +226,59 @@ export const TachistoscopeView: React.FC<TachistoscopeViewProps> = ({
   const [round, setRound] = useState<number>(0);
   const [phase, setPhase] = useState<'ready' | 'flashing' | 'choosing'>('ready');
   const [targetChunk, setTargetChunk] = useState<string>('');
+  const [precedingContext, setPrecedingContext] = useState<string>('');
   const [options, setOptions] = useState<string[]>([]);
   const [correctCount, setCorrectCount] = useState<number>(0);
 
-  // Exposure window between 140ms and 240ms depending on targetWpm
-  const flashMs = Math.max(140, Math.min(250, Math.round((2.8 / targetWpm) * 60000)));
+  // Start at a comfortable ESL-friendly exposure (e.g. ~260-340ms) and adapt round-by-round
+  const initialFlashMs = Math.max(
+    200,
+    Math.min(360, Math.round((2.6 / targetWpm) * 60000) + 45)
+  );
+  const [flashMs, setFlashMs] = useState<number>(initialFlashMs);
+  const [spanLevel, setSpanLevel] = useState<number>(0); // 0 = short (7-14 chars), 1 = medium (11-18 chars), 2 = full (14-22 chars)
 
   const setupRound = useCallback(
-    (roundIdx: number) => {
-      // Prefer compact multi-word chunks (2-3 words, 8-22 chars) that fit cleanly on a single
-      // horizontal parafoveal line without exceeding single-fixation span
-      const compactMultiWordPool = passage.chunks.filter((c) => {
+    (roundIdx: number, targetSpanLevel: number) => {
+      const maxChars =
+        targetSpanLevel === 0 ? 14 : targetSpanLevel === 1 ? 18 : 22;
+      const minChars = targetSpanLevel === 0 ? 6 : 8;
+
+      const candidateIndices: number[] = [];
+      passage.chunks.forEach((c, idx) => {
         const trimmed = c.trim();
         const wordCount = trimmed.split(/\s+/).length;
-        return wordCount >= 2 && trimmed.length >= 8 && trimmed.length <= 22;
+        if (
+          wordCount >= 2 &&
+          trimmed.length >= minChars &&
+          trimmed.length <= maxChars
+        ) {
+          candidateIndices.push(idx);
+        }
       });
-      const fallbackMultiWordPool = passage.chunks.filter(
-        (c) => c.trim().split(/\s+/).length >= 2 && c.length >= 8
-      );
-      const sourcePool =
-        compactMultiWordPool.length >= 4
-          ? compactMultiWordPool
-          : fallbackMultiWordPool.length >= 4
-          ? fallbackMultiWordPool
-          : passage.chunks;
-      const chosenIdx = (roundIdx * 7 + 3) % sourcePool.length;
-      const target = sourcePool[chosenIdx];
+
+      if (candidateIndices.length < 3) {
+        passage.chunks.forEach((c, idx) => {
+          const trimmed = c.trim();
+          if (trimmed.length >= 6 && trimmed.length <= 22) {
+            candidateIndices.push(idx);
+          }
+        });
+      }
+
+      const poolIndices =
+        candidateIndices.length > 0
+          ? candidateIndices
+          : passage.chunks.map((_, idx) => idx);
+      const chosenChunkIdx =
+        poolIndices[(roundIdx * 5 + 2) % poolIndices.length];
+      const target = passage.chunks[chosenChunkIdx];
+      const prev =
+        chosenChunkIdx > 0 ? passage.chunks[chosenChunkIdx - 1] : '';
 
       const combined = buildPeripheralSpanOptions(target, passage.chunks);
       setTargetChunk(target);
+      setPrecedingContext(prev);
       setOptions(combined);
       setPhase('ready');
     },
@@ -230,16 +286,16 @@ export const TachistoscopeView: React.FC<TachistoscopeViewProps> = ({
   );
 
   useEffect(() => {
-    setupRound(0);
+    setupRound(0, 0);
   }, [setupRound]);
 
-  // Sequence: ready (450ms) -> flashing (flashMs) -> choosing
+  // Sequence: ready (500ms) -> flashing (flashMs) -> choosing
   useEffect(() => {
     if (phase === 'ready') {
       const t = window.setTimeout(() => {
         soundEngine.playChunkTick(true);
         setPhase('flashing');
-      }, 450);
+      }, 500);
       return () => window.clearTimeout(t);
     }
     if (phase === 'flashing') {
@@ -250,11 +306,25 @@ export const TachistoscopeView: React.FC<TachistoscopeViewProps> = ({
     }
   }, [phase, flashMs]);
 
+  const handleReflash = useCallback(() => {
+    if (phase !== 'choosing') return;
+    soundEngine.playUiClick();
+    setFlashMs((ms) => Math.min(450, ms + 25));
+    setPhase('ready');
+  }, [phase]);
+
   const handlePick = useCallback(
     (picked: string) => {
       if (phase !== 'choosing') return;
       const isRight = picked === targetChunk;
       const nextCorrect = isRight ? correctCount + 1 : correctCount;
+
+      const nextFlashMs = isRight
+        ? Math.max(120, flashMs - 22)
+        : Math.min(440, flashMs + 40);
+      const nextSpanLevel = isRight
+        ? Math.min(2, spanLevel + 1)
+        : Math.max(0, spanLevel - 1);
 
       if (isRight) {
         soundEngine.playQuizCorrect(false);
@@ -262,45 +332,75 @@ export const TachistoscopeView: React.FC<TachistoscopeViewProps> = ({
         soundEngine.playQuizWrong();
       }
 
+      setFlashMs(nextFlashMs);
+      setSpanLevel(nextSpanLevel);
+
       if (round + 1 < TOTAL_ROUNDS) {
         setCorrectCount(nextCorrect);
         const nextRound = round + 1;
         setRound(nextRound);
-        setupRound(nextRound);
+        setupRound(nextRound, nextSpanLevel);
       } else {
-        onComplete(nextCorrect, TOTAL_ROUNDS, flashMs);
+        onComplete(nextCorrect, TOTAL_ROUNDS, nextFlashMs);
       }
     },
-    [phase, targetChunk, correctCount, round, setupRound, onComplete, flashMs]
+    [
+      phase,
+      targetChunk,
+      correctCount,
+      round,
+      setupRound,
+      onComplete,
+      flashMs,
+      spanLevel,
+    ]
   );
 
-  // Number keys 1-4 shortcut
+  // Number keys 1-4 shortcut + Space to Re-flash
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (phase !== 'choosing') return;
       if (['Digit1', 'Digit2', 'Digit3', 'Digit4'].includes(e.code)) {
         const idx = Number(e.code.replace('Digit', '')) - 1;
         if (options[idx]) handlePick(options[idx]);
+      } else if (e.code === 'Space') {
+        e.preventDefault();
+        handleReflash();
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [phase, options, handlePick]);
+  }, [phase, options, handlePick, handleReflash]);
+
+  const effectiveFlashWpm = Math.round((2.6 / flashMs) * 60000);
 
   return (
     <ChamferedPanel
       variant="cyan"
       cutSize={16}
-      tag={`FLASH ${flashMs}ms`}
+      tag={`ADAPTIVE FLASH ${flashMs}ms (~${effectiveFlashWpm} WPM)`}
       title={`TACHISTOSCOPE DRILL // ROUND ${round + 1} OF ${TOTAL_ROUNDS}`}
       className="flex-1 flex flex-col justify-center"
       innerClassName="p-6 sm:p-10 justify-center"
     >
-      <div className="max-w-2xl mx-auto w-full space-y-8 text-center">
+      <div className="max-w-2xl mx-auto w-full space-y-6 text-center">
+        {/* Context Lead-in + Adaptive Span Status */}
+        <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-1.5 bg-[#180B29] border border-[#00F5D4]/30 font-terminal text-xs">
+          <span className="text-[#6C7A89]">
+            CONTEXT LEAD-IN:{' '}
+            <strong className="text-[#F2F5F8]/85">
+              {precedingContext ? `... ${precedingContext} →` : '(PASSAGE START) →'}
+            </strong>
+          </span>
+          <span className="text-[#FFE600]">
+            SPAN TIER: {spanLevel === 0 ? 'COMPACT' : spanLevel === 1 ? 'STANDARD' : 'WIDE'}
+          </span>
+        </div>
+
         {/* Flash Reticle Window */}
         <div className="h-32 bg-[#0D0618] border border-[#00F5D4]/50 flex items-center justify-center relative overflow-hidden px-3">
           <div className="absolute top-2 left-3 font-terminal text-[10px] text-[#6C7A89]">
-            EXPOSURE: {flashMs} MS // FULL-SPAN CHECK
+            EXPOSURE: {flashMs} MS // LOCK GAZE ON MAGENTA PIVOT
           </div>
           {/* Subtle top/bottom center reticle ticks */}
           <div className="absolute top-0 left-1/2 -translate-x-1/2 w-0.5 h-2.5 bg-[#FF1E7A]/70" />
@@ -308,18 +408,23 @@ export const TachistoscopeView: React.FC<TachistoscopeViewProps> = ({
 
           {phase === 'ready' && (
             <span className="font-terminal text-xs text-[#6C7A89] animate-pulse">
-              [ LOCK GAZE AT CENTER RETICLE + CAPTURE ALL WORDS ]
+              [ KEEP EYES ON CENTER RETICLE ]
             </span>
           )}
-          {phase === 'flashing' && (
-            <span className="whitespace-nowrap text-lg sm:text-xl font-medium text-[#00F5D4] tracking-normal select-none">
-              {targetChunk}
-            </span>
-          )}
+          {phase === 'flashing' && renderFlashedOrpChunk(targetChunk)}
           {phase === 'choosing' && (
-            <span className="font-terminal text-xs text-[#FFE600]">
-              VERIFY ALL WORDS — LEFT, CENTER &amp; RIGHT (KEYS 1–4)
-            </span>
+            <div className="flex items-center gap-3 font-terminal text-xs">
+              <span className="text-[#FFE600]">
+                SELECT MATCHING PHRASE (KEYS 1–4)
+              </span>
+              <button
+                type="button"
+                onClick={handleReflash}
+                className="px-2.5 py-1 bg-[#180B29] border border-[#00F5D4]/60 text-[#00F5D4] hover:bg-[#00F5D4]/15 cursor-pointer"
+              >
+                RE-FLASH [SPACE]
+              </button>
+            </div>
           )}
         </div>
 

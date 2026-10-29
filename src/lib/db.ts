@@ -361,7 +361,8 @@ export async function recordSessionAndUpdateProfile(
   session: SessionLog,
   wordsRead: number,
   selectedTargetWpm: number,
-  passageCategory?: string
+  passageCategory?: string,
+  candidateGhostWeights?: number[]
 ): Promise<{
   profile: UserProfile;
   isNewOverallBest: boolean;
@@ -419,6 +420,10 @@ export async function recordSessionAndUpdateProfile(
     stageCompleted: nextStageCompleted,
     attempts: prevRecord.attempts + 1,
     updatedAt: Date.now(),
+    bestChunkWeights:
+      isNewPassageBest && candidateGhostWeights && candidateGhostWeights.length > 0
+        ? candidateGhostWeights
+        : prevRecord.bestChunkWeights,
   };
 
   if (!isCalibration) {

@@ -190,8 +190,44 @@ export function computeChunkCognitiveWeight(
 }
 
 /**
+ * Blends the player's recorded per-chunk durations from a Personal Best run (50%)
+ * with the theoretical fluent cognitive weights (50%), after clamping outlier
+ * stumbles/freezes to [0.55x, 1.65x] of the ideal weight.
+ * This preserves the player's natural breathing & phrasing rhythm while ironing out
+ * accidental lexical stumbles so bad habits are never baked into the Ghost pacemaker.
+ */
+export function buildSmoothedGhostWeights(
+  chunks: string[],
+  recordedDurationsMs: number[],
+  mode: TrainingMode
+): number[] {
+  const idealWeights = chunks.map((c) => computeChunkCognitiveWeight(c, mode));
+  if (recordedDurationsMs.length !== chunks.length || chunks.length === 0) {
+    return idealWeights;
+  }
+
+  const totalIdeal = idealWeights.reduce((a, b) => a + b, 0) || 1;
+  const totalRecorded =
+    recordedDurationsMs.reduce((a, b) => a + Math.max(40, b), 0) || 1;
+
+  return idealWeights.map((ideal, idx) => {
+    const rawMs = Math.max(40, recordedDurationsMs[idx] || 0);
+    // Normalize player's chunk duration onto the same total weight scale as `idealWeights`
+    const normalizedPlayerWeight = (rawMs / totalRecorded) * totalIdeal;
+    // Clamp extreme stumbles or accidental double-taps to [0.55x, 1.65x] of ideal weight
+    const clampedPlayer = Math.max(
+      ideal * 0.55,
+      Math.min(ideal * 1.65, normalizedPlayerWeight)
+    );
+    // 50% ideal cognitive curve + 50% clamped player cadence
+    return Number((ideal * 0.5 + clampedPlayer * 0.5).toFixed(3));
+  });
+}
+
+/**
  * Computes the exact millisecond duration for `chunkIndex` such that:
- * 1. Every chunk's duration is proportional to its character/lexical cognitive weight.
+ * 1. Every chunk's duration is proportional to `customWeights` (if a PB Ghost profile exists)
+ *    or its character/lexical cognitive weight.
  * 2. The sum of all chunk durations across the passage equals the exact total time for `activeWpm`.
  */
 export function computeChunkDurationMs(
@@ -199,10 +235,14 @@ export function computeChunkDurationMs(
   chunkIndex: number,
   totalWords: number,
   activeWpm: number,
-  mode: TrainingMode
+  mode: TrainingMode,
+  customWeights?: number[]
 ): number {
   if (chunks.length === 0) return 250;
-  const weights = chunks.map((c) => computeChunkCognitiveWeight(c, mode));
+  const weights =
+    customWeights && customWeights.length === chunks.length
+      ? customWeights
+      : chunks.map((c) => computeChunkCognitiveWeight(c, mode));
   const totalWeight = weights.reduce((acc, w) => acc + w, 0) || 1;
   const totalPassageMs =
     (Math.max(1, totalWords) / Math.max(60, activeWpm)) * 60000;
