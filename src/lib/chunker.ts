@@ -232,10 +232,10 @@ export function generateHeuristicQuestions(
       questions.push({
         id: `q-auto-${sIdx}-${pass}-${qIdx}`,
         code: `CLOZE-0${qIdx + 1}`,
-        question: `Which key term accurately completes this statement from "${title}": "${blankedSentence}"`,
+        question: `Which key term accurately completes this statement from "${title}":\n"${blankedSentence}"`,
         options: ordered,
         correctIndex: correctPos,
-        explanation: `In the original passage context: "${sentence}"`,
+        explanation: `In the original passage context:\n"${sentence}"`,
       });
     }
   }

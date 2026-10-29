@@ -64,9 +64,9 @@ export function QuizScreen({
         <div className="p-6 space-y-5">
           <h2
             title="Tap any word to translate"
-            className="text-base sm:text-lg font-bold text-[#F2F5F8] leading-snug cursor-pointer"
+            className="text-base sm:text-lg font-bold text-[#F2F5F8] leading-relaxed whitespace-pre-line cursor-pointer"
           >
-            {q.question}
+            {q.question.replace(/:\s+"/, ':\n"')}
           </h2>
 
           <div className="space-y-2.5">
@@ -148,11 +148,11 @@ export function QuizScreen({
 
           {selectedOption !== null && (
             <div className="pt-4 border-t border-[#FFE600]/20 space-y-4">
-              <p className="text-xs text-[#6C7A89] leading-relaxed">
+              <p className="text-xs text-[#6C7A89] leading-relaxed whitespace-pre-line">
                 <strong className="text-[#F2F5F8] font-terminal mr-1.5">
                   ANALYSIS:
                 </strong>
-                {q.explanation}
+                {q.explanation.replace(/:\s+"/, ':\n"')}
               </p>
 
               <button
