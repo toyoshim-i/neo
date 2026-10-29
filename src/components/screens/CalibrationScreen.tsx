@@ -61,7 +61,7 @@ export function CalibrationScreen({
             return (
               <span key={idx}>
                 <span
-                  className={`inline py-0.5 border-b-2 transition-colors duration-75 ${
+                  className={`inline whitespace-nowrap py-0.5 border-b-2 transition-colors duration-75 ${
                     isActive
                       ? 'bg-[#FFE600]/20 border-[#FFE600] text-[#F2F5F8]'
                       : isPassed

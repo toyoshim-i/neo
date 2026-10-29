@@ -128,7 +128,7 @@ export function PreviewScreen({
                     onTranslateChunkOrWord(initialQuery, idx, chunk, rect);
                   }}
                   title="Tap any word or phrase to translate"
-                  className={`inline py-0.5 border-b-2 cursor-pointer transition-colors duration-75 ${
+                  className={`inline whitespace-nowrap py-0.5 border-b-2 cursor-pointer transition-colors duration-75 ${
                     isSelectedInPopup
                       ? 'bg-[#00F5D4]/20 border-[#00F5D4] text-[#F2F5F8]'
                       : isChecked

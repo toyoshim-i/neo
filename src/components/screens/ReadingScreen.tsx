@@ -253,7 +253,7 @@ export function ReadingScreen({
               </button>
             </div>
           ) : (
-            <div className="leading-[2.2] text-lg sm:text-xl font-medium select-none">
+            <div className="pretty-text leading-[2.2] text-lg sm:text-xl font-medium select-none">
               {selectedPassage.chunks.map((chunk, idx) => {
                 const isActive = idx === activeChunkIndex;
                 const isPassed = idx < activeChunkIndex;
@@ -280,7 +280,7 @@ export function ReadingScreen({
                       style={{
                         opacity: isPassed && fadeOutPassed ? 0.15 : 1,
                       }}
-                      className={`inline py-0.5 border-b-2 cursor-pointer transition-colors duration-75 ${
+                      className={`inline whitespace-nowrap py-0.5 border-b-2 cursor-pointer transition-colors duration-75 ${
                         isActive
                           ? isMarker
                             ? 'bg-[#FF1E7A]/15 border-[#FF1E7A] text-[#F2F5F8]'
