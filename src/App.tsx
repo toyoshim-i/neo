@@ -335,6 +335,11 @@ export function App() {
     return () => unsub();
   }, []);
 
+  // Reset window scroll position to top on screen transitions so top-down UI flow stays aligned
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+  }, [screen, quizIndex]);
+
   const allPassages: TrainingPassage[] = [
     ...customPassages,
     ...PRESET_PASSAGES,
