@@ -312,15 +312,7 @@ export const TachistoscopeView: React.FC<TachistoscopeViewProps> = ({
             </span>
           )}
           {phase === 'flashing' && (
-            <span
-              className={`font-terminal whitespace-nowrap font-bold text-[#00F5D4] tracking-wide select-none ${
-                targetChunk.length > 22
-                  ? 'text-base sm:text-2xl'
-                  : targetChunk.length > 16
-                  ? 'text-lg sm:text-3xl'
-                  : 'text-xl sm:text-4xl'
-              }`}
-            >
+            <span className="whitespace-nowrap text-lg sm:text-xl font-medium text-[#00F5D4] tracking-normal select-none">
               {targetChunk}
             </span>
           )}

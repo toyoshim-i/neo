@@ -161,19 +161,10 @@ function renderRsvpChunk(chunk: string) {
   const pivot = trimmed.charAt(pivotIdx);
   const after = trimmed.slice(pivotIdx + 1);
 
-  const sizeClass =
-    cleanLength > 24
-      ? 'text-lg sm:text-3xl'
-      : cleanLength > 17
-      ? 'text-xl sm:text-4xl'
-      : 'text-2xl sm:text-5xl';
-
   return (
-    <div
-      className={`font-terminal ${sizeClass} font-bold tracking-wide select-none w-full grid grid-cols-[1fr_auto_1fr] items-baseline overflow-hidden`}
-    >
+    <div className="text-lg sm:text-xl font-medium tracking-normal select-none w-full grid grid-cols-[1fr_auto_1fr] items-baseline overflow-hidden">
       <span className="text-[#F2F5F8] text-right whitespace-pre">{before}</span>
-      <span className="text-[#FF1E7A] border-b-2 border-[#FF1E7A] pb-0.5 whitespace-pre">
+      <span className="text-[#FF1E7A] font-bold border-b-2 border-[#FF1E7A] pb-0.5 whitespace-pre">
         {pivot}
       </span>
       <span className="text-[#F2F5F8] text-left whitespace-pre">{after}</span>
@@ -433,13 +424,13 @@ export function ReadingScreen({
           innerClassName="justify-center p-6 sm:p-10"
         >
           {selectedMode === 'rsvp' ? (
-            <div className="py-16 flex flex-col items-center justify-center space-y-6">
-              <div className="w-48 h-px bg-[#FF1E7A]/40 relative">
-                <div className="w-0.5 h-3 bg-[#FF1E7A] absolute left-1/2 -top-1.5" />
-              </div>
-              {renderRsvpChunk(selectedPassage.chunks[activeChunkIndex] || '')}
-              <div className="w-48 h-px bg-[#FF1E7A]/40 relative">
-                <div className="w-0.5 h-3 bg-[#FF1E7A] absolute left-1/2 -bottom-1.5" />
+            <div className="py-12 flex flex-col items-center justify-center space-y-5">
+              <div className="w-64 sm:w-80 py-6 bg-[#0D0618]/80 border-y border-[#FF1E7A]/40 relative flex items-center justify-center">
+                <div className="w-0.5 h-2.5 bg-[#FF1E7A] absolute left-1/2 top-0 -translate-x-1/2" />
+                {renderRsvpChunk(
+                  selectedPassage.chunks[activeChunkIndex] || ''
+                )}
+                <div className="w-0.5 h-2.5 bg-[#FF1E7A] absolute left-1/2 bottom-0 -translate-x-1/2" />
               </div>
               <button
                 type="button"
