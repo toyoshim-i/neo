@@ -99,14 +99,12 @@ export function App() {
   const [showSettingsModal, setShowSettingsModal] = useState<boolean>(false);
   const [cachedModels, setCachedModels] = useState<
     Record<WebLlmModelId, boolean>
-  >({
-    'bonsai-1.7b-q1': false,
-    'bonsai-2-2b-ptq1': false,
-    'bonsai-2-2b-pq2': false,
-    'bonsai-4b-q1': false,
-    'bonsai-2-4b-ptq1': false,
-    'bonsai-2-4b-pq2': false,
-  });
+  >(
+    () =>
+      Object.fromEntries(
+        WEBLLM_MODEL_OPTIONS.map((opt) => [opt.id, false])
+      ) as Record<WebLlmModelId, boolean>
+  );
 
   // Persistent Data & Profile State
   const [profile, setProfile] = useState<UserProfile>(DEFAULT_PROFILE);
