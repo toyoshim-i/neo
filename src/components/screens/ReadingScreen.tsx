@@ -197,15 +197,15 @@ function renderSyntaxSkimmerChunk(
     let wordClass = '';
     if (isPivot) {
       wordClass = isActive
-        ? 'text-[#FF1E7A] font-extrabold'
+        ? 'text-[#FF1E7A] font-bold'
         : 'text-[#FF1E7A]/80 font-bold';
     } else if (isFunction) {
       wordClass = isActive
-        ? 'text-[#F2F5F8]/45 font-normal text-[0.92em]'
-        : 'text-[#6C7A89]/40 font-normal text-[0.92em]';
+        ? 'text-[#F2F5F8]/45 font-normal'
+        : 'text-[#6C7A89]/40 font-normal';
     } else {
       wordClass = isActive
-        ? 'text-[#00F5D4] font-bold'
+        ? 'text-[#00F5D4] font-semibold'
         : 'text-[#F2F5F8]/80 font-semibold';
     }
 
@@ -265,7 +265,7 @@ function renderLexicalAnchorChunk(chunk: string, isActive: boolean) {
         <span
           className={
             isActive
-              ? 'text-[#00F5D4] font-extrabold'
+              ? 'text-[#00F5D4] font-bold'
               : 'text-[#F2F5F8]/90 font-bold'
           }
         >
@@ -640,13 +640,13 @@ export function ReadingScreen({
                         }
                         className={`relative inline-block whitespace-nowrap px-2.5 py-0.5 border-b-2 text-base sm:text-xl font-medium cursor-pointer transition-colors duration-75 ${
                           isActive && isGhost
-                            ? 'bg-[#00F5D4]/20 border-[#00F5D4] border-t-2 border-t-[#FFE600] text-[#F2F5F8] font-bold'
+                            ? 'bg-[#00F5D4]/20 border-[#00F5D4] border-t-2 border-t-[#FFE600] text-[#F2F5F8]'
                             : isActive
                             ? isMarker
-                              ? 'bg-[#FF1E7A]/20 border-[#FF1E7A] text-[#F2F5F8] font-bold'
-                              : 'bg-[#00F5D4]/20 border-[#00F5D4] text-[#F2F5F8] font-bold'
+                              ? 'bg-[#FF1E7A]/20 border-[#FF1E7A] text-[#F2F5F8]'
+                              : 'bg-[#00F5D4]/20 border-[#00F5D4] text-[#F2F5F8]'
                             : isGhost
-                            ? 'bg-[#FFE600]/15 border-dashed border-[#FFE600] text-[#FFE600] font-semibold'
+                            ? 'bg-[#FFE600]/15 border-dashed border-[#FFE600] text-[#FFE600]'
                             : isCurrentCycle
                             ? 'bg-[#180B29]/50 border-transparent text-[#F2F5F8]/80'
                             : 'border-transparent text-[#6C7A89]'
