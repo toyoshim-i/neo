@@ -75,7 +75,10 @@ import {
   computeChunkDurationMs,
   buildSmoothedGhostWeights,
 } from './lib/pacing';
-import { LexiconPopupState } from './lib/wordLookup';
+import {
+  LexiconPopupState,
+  extractWordAtClientPoint,
+} from './lib/wordLookup';
 
 export function App() {
   // Navigation & Hierarchy State
@@ -526,22 +529,42 @@ export function App() {
     ]
   );
 
-  // Dismiss the Preview lexicon popover when clicking outside the popover or interactive chunks
+  // Universal Tap-to-Translate handler for non-reading screens (Quiz, Preview, Result, UI, Modals)
+  // Disabled during `screen === 'reading'` so taps during time-attack reading exclusively advance chunks.
   const handleGlobalContainerClick = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
-      if (!lexiconPopup) return;
+      if (screen === 'reading') {
+        if (lexiconPopup) setLexiconPopup(null);
+        return;
+      }
+
       const target = e.target as HTMLElement | null;
       if (!target) return;
+
+      if (target.closest('[data-lexicon-popup="true"]')) return;
+
       if (
         target.closest(
-          '[data-lexicon-popup="true"], [data-chunk-interactive="true"]'
+          'button:not(:disabled), a, input, select, textarea, label, [data-chunk-interactive="true"]'
         )
       ) {
         return;
       }
-      setLexiconPopup(null);
+
+      const hit = extractWordAtClientPoint(e.clientX, e.clientY);
+      if (hit) {
+        void handleTranslateChunkOrWord(
+          hit.word,
+          -1,
+          hit.phrase,
+          hit.rect,
+          hit.contextSentence
+        );
+      } else if (lexiconPopup) {
+        setLexiconPopup(null);
+      }
     },
-    [lexiconPopup]
+    [screen, handleTranslateChunkOrWord, lexiconPopup]
   );
 
   // Transition from Reading to Quiz
@@ -1262,6 +1285,7 @@ export function App() {
           selectedOption={selectedOption}
           onSelectQuizOption={handleSelectQuizOption}
           onNextQuizStep={handleNextQuizStep}
+          onTranslateChunkOrWord={handleTranslateChunkOrWord}
         />
       )}
 
@@ -1359,7 +1383,7 @@ export function App() {
         />
       )}
 
-      {screen === 'preview' && lexiconPopup && (
+      {screen !== 'reading' && lexiconPopup && (
         <LexiconPopover
           popup={lexiconPopup}
           screen={screen}
