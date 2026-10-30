@@ -1,5 +1,6 @@
+import { useState } from 'react';
 import { X } from 'lucide-react';
-import { ACHIEVEMENT_CATALOG } from '../../lib/db';
+import { ACHIEVEMENT_CATALOG, AchievementCategory } from '../../lib/db';
 import { UserProfile } from '../../types/schema';
 import { ChamferedPanel } from '../layout/ChamferedPanel';
 
@@ -8,10 +9,31 @@ interface AchievementsModalProps {
   onClose: () => void;
 }
 
+const CATEGORY_TABS: {
+  id: 'ALL' | AchievementCategory;
+  label: string;
+}[] = [
+  { id: 'ALL', label: 'ALL' },
+  { id: 'CADENCE', label: 'CADENCE & VOLUME' },
+  { id: 'ENGINES', label: '6 ENGINES' },
+  { id: 'MASTERY', label: 'MASTERY' },
+  { id: 'VELOCITY', label: 'VELOCITY' },
+];
+
 export function AchievementsModal({
   profile,
   onClose,
 }: AchievementsModalProps) {
+  const [selectedCategory, setSelectedCategory] = useState<
+    'ALL' | AchievementCategory
+  >('ALL');
+
+  const unlockedSet = new Set(profile.unlockedAchievements || []);
+  const filteredAchievements =
+    selectedCategory === 'ALL'
+      ? ACHIEVEMENT_CATALOG
+      : ACHIEVEMENT_CATALOG.filter((ach) => ach.category === selectedCategory);
+
   return (
     <div className="fixed inset-0 z-50 bg-[#0D0618]/85 backdrop-blur-xs flex items-center justify-center p-4">
       <div className="max-w-xl w-full">
@@ -19,9 +41,7 @@ export function AchievementsModal({
           variant="yellow"
           cutSize={12}
           tag="MILESTONES"
-          title={`NEURAL ACHIEVEMENTS (${
-            profile.unlockedAchievements?.length || 0
-          }/${ACHIEVEMENT_CATALOG.length})`}
+          title={`NEURAL ACHIEVEMENTS (${unlockedSet.size}/${ACHIEVEMENT_CATALOG.length})`}
           rightSlot={
             <button
               type="button"
@@ -35,9 +55,9 @@ export function AchievementsModal({
           <div className="p-4 space-y-3 max-h-[75vh] overflow-y-auto font-terminal text-xs">
             <div className="grid grid-cols-3 gap-2 text-center">
               <div className="p-2.5 bg-[#0D0618] border border-[#00F5D4]/30">
-                <div className="text-[10px] text-[#6C7A89]">BASELINE</div>
+                <div className="text-[10px] text-[#6C7A89]">TOTAL WORDS</div>
                 <div className="text-sm font-bold text-[#00F5D4]">
-                  {profile.baselineWpm ? `${profile.baselineWpm} WPM` : 'UNSET'}
+                  {(profile.totalWordsRead || 0).toLocaleString()}
                 </div>
               </div>
               <div className="p-2.5 bg-[#0D0618] border border-[#FFE600]/30">
@@ -60,11 +80,37 @@ export function AchievementsModal({
               </div>
             </div>
 
-            <div className="space-y-2">
-              {ACHIEVEMENT_CATALOG.map((ach) => {
-                const isUnlocked = Boolean(
-                  profile.unlockedAchievements?.includes(ach.id)
+            {/* Category filter tabs */}
+            <div className="flex flex-wrap gap-1.5 pt-1">
+              {CATEGORY_TABS.map((tab) => {
+                const items =
+                  tab.id === 'ALL'
+                    ? ACHIEVEMENT_CATALOG
+                    : ACHIEVEMENT_CATALOG.filter((a) => a.category === tab.id);
+                const unlockedCount = items.filter((a) =>
+                  unlockedSet.has(a.id)
+                ).length;
+                const active = selectedCategory === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setSelectedCategory(tab.id)}
+                    className={`px-2 py-1 text-[10px] font-bold border transition-colors cursor-pointer ${
+                      active
+                        ? 'bg-[#FFE600] text-[#0D0618] border-[#FFE600]'
+                        : 'bg-[#0D0618] text-[#6C7A89] border-[#6C7A89]/40 hover:text-[#F2F5F8] hover:border-[#6C7A89]'
+                    }`}
+                  >
+                    {tab.label} ({unlockedCount}/{items.length})
+                  </button>
                 );
+              })}
+            </div>
+
+            <div className="space-y-2">
+              {filteredAchievements.map((ach) => {
+                const isUnlocked = unlockedSet.has(ach.id);
                 return (
                   <div
                     key={ach.id}
@@ -75,7 +121,7 @@ export function AchievementsModal({
                     }`}
                   >
                     <div className="space-y-1">
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
                         <span
                           className={`px-1.5 py-0.5 text-[10px] border font-bold ${
                             isUnlocked

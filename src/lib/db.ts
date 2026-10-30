@@ -7,15 +7,23 @@ import {
   PassageProgress,
 } from '../types/schema';
 
+export type AchievementCategory =
+  | 'CADENCE'
+  | 'ENGINES'
+  | 'MASTERY'
+  | 'VELOCITY';
+
 export interface AchievementDefinition {
   id: AchievementId;
   title: string;
   subtitle: string;
   description: string;
   badgeCode: string;
+  category: AchievementCategory;
 }
 
 export const ACHIEVEMENT_CATALOG: readonly AchievementDefinition[] = [
+  // 1. CADENCE & VOLUME (Session count, active days, and cumulative words)
   {
     id: 'NEURAL_CALIBRATED',
     title: 'NEURAL CALIBRATED',
@@ -23,6 +31,7 @@ export const ACHIEVEMENT_CATALOG: readonly AchievementDefinition[] = [
     description:
       'Complete your first reading run to measure your natural pace and generate your Ghost pacemaker.',
     badgeCode: 'CAL-01',
+    category: 'CADENCE',
   },
   {
     id: 'FIRST_SYNC',
@@ -31,86 +40,297 @@ export const ACHIEVEMENT_CATALOG: readonly AchievementDefinition[] = [
     description:
       'Pass your first comprehension verification quiz (>=66% sync rate) on any training passage.',
     badgeCode: 'SYN-02',
+    category: 'CADENCE',
   },
   {
-    id: 'L2_FLUENCY_TIER',
-    title: 'L2 FLUENCY TIER',
-    subtitle: '180+ eWPM Verified',
+    id: 'SESSION_3',
+    title: 'WARMUP SEQUENCE',
+    subtitle: '3 Sessions Completed',
     description:
-      'Achieve 180+ Effective WPM with verified comprehension, entering the global L2 upper quartile.',
-    badgeCode: 'L2F-03',
+      'Complete 3 reading training sessions across any modes or passages.',
+    badgeCode: 'RUN-03',
+    category: 'CADENCE',
   },
   {
-    id: 'NATIVE_HORIZON',
-    title: 'NATIVE HORIZON',
-    subtitle: '238+ eWPM on Unseen Text',
+    id: 'SESSION_5',
+    title: 'SYNAPTIC ROUTINE',
+    subtitle: '5 Sessions Completed',
     description:
-      'Pass a comprehension quiz at 238+ eWPM (L1 native adult average) on your very first attempt at a passage.',
-    badgeCode: 'NAT-04',
+      'Complete 5 reading training sessions to establish a steady neural training habit.',
+    badgeCode: 'RUN-04',
+    category: 'CADENCE',
   },
   {
-    id: 'SUBVOCAL_BREAKER',
-    title: 'SUBVOCAL BARRIER BROKEN',
-    subtitle: '250+ eWPM Verified',
+    id: 'SESSION_10',
+    title: 'DECADE UPLINK',
+    subtitle: '10 Sessions Completed',
     description:
-      'Pass a comprehension quiz with an effective reading speed of 250 eWPM or higher, surpassing vocal speech limits.',
-    badgeCode: 'SVB-05',
+      'Complete 10 reading training sessions in your neural telemetry log.',
+    badgeCode: 'RUN-05',
+    category: 'CADENCE',
   },
   {
-    id: 'VELOCITY_300',
-    title: 'CORTICAL OVERDRIVE',
-    subtitle: '300+ eWPM Verified',
+    id: 'SESSION_25',
+    title: 'QUARTER-CENTURY LINK',
+    subtitle: '25 Sessions Completed',
     description:
-      'Reach 300+ Effective WPM with verified comprehension, entering the top 2% of global L2 readers.',
-    badgeCode: 'VEL-06',
+      'Complete 25 reading training sessions across the training corpus.',
+    badgeCode: 'RUN-06',
+    category: 'CADENCE',
   },
   {
-    id: 'HYPER_SACCADE',
-    title: 'HYPER-SACCADE',
-    subtitle: '350+ eWPM Elite',
+    id: 'SESSION_50',
+    title: 'FIFTY-REP CORTEX',
+    subtitle: '50 Sessions Completed',
     description:
-      'Reach the elite 350+ eWPM visual intake tier with verified comprehension (top 1.5% L1 human tier).',
-    badgeCode: 'HYP-07',
+      'Complete 50 reading training sessions, cementing high-speed visual processing.',
+    badgeCode: 'RUN-07',
+    category: 'CADENCE',
   },
   {
-    id: 'APEX_400',
-    title: 'CYBERNETIC APEX',
-    subtitle: '400+ eWPM Apex',
+    id: 'SESSION_100',
+    title: 'CENTURION OVERCLOCK',
+    subtitle: '100 Sessions Completed',
     description:
-      'Achieve 400+ Effective WPM with verified comprehension, reaching peak human visual intake velocity.',
-    badgeCode: 'APX-08',
+      'Complete 100 reading training sessions—true dedication to L2 visual mastery.',
+    badgeCode: 'RUN-08',
+    category: 'CADENCE',
   },
   {
-    id: 'PERFECT_SYNC',
-    title: 'PERFECT SYNAPSE',
-    subtitle: '100% Quiz Accuracy',
+    id: 'STREAK_3',
+    title: 'TRI-DAY PULSE',
+    subtitle: '3+ Active Training Days',
     description:
-      'Score a flawless 100% comprehension sync rate on any training passage.',
-    badgeCode: 'PRF-09',
+      'Train across at least 3 distinct calendar days (or reach a 3-day streak).',
+    badgeCode: 'STR-09',
+    category: 'CADENCE',
   },
   {
-    id: 'CRITICAL_REFLEX',
-    title: 'ZERO REGRESSION FLOW',
-    subtitle: '100% Flow + 100% Sync',
+    id: 'STREAK_7',
+    title: 'HEPTA-CYCLE HABIT',
+    subtitle: '7+ Active Training Days',
     description:
-      'Complete a passage with zero backward regressions (100% Forward Flow) and 100% quiz accuracy.',
-    badgeCode: 'FLW-10',
+      'Train across at least 7 distinct calendar days (or reach a 7-day streak).',
+    badgeCode: 'STR-10',
+    category: 'CADENCE',
   },
   {
-    id: 'FLASH_SNAPSHOT',
-    title: 'RETINAL SNAPSHOT',
-    subtitle: 'Tachistoscope 80%+ Sync',
+    id: 'WORDS_500',
+    title: 'FIRST KILOBYTE',
+    subtitle: '500+ Words Read',
     description:
-      'Complete a Tachistoscope peripheral flash drill with at least 80% phrase recognition accuracy.',
-    badgeCode: 'TCH-11',
+      'Accumulate at least 500 total words read across your training sessions.',
+    badgeCode: 'VOL-11',
+    category: 'CADENCE',
+  },
+  {
+    id: 'WORDS_1500',
+    title: 'LEXICAL BUFFER',
+    subtitle: '1,500+ Words Read',
+    description:
+      'Accumulate at least 1,500 total words read across your training sessions.',
+    badgeCode: 'VOL-12',
+    category: 'CADENCE',
+  },
+  {
+    id: 'WORDS_3000',
+    title: 'BROADBAND INTAKE',
+    subtitle: '3,000+ Words Read',
+    description:
+      'Accumulate at least 3,000 total words read across your training sessions.',
+    badgeCode: 'VOL-13',
+    category: 'CADENCE',
+  },
+  {
+    id: 'MARATHON_CORTEX',
+    title: 'MARATHON CORTEX',
+    subtitle: '5,000+ Words Read',
+    description:
+      'Accumulate at least 5,000 total words read across your neural training log.',
+    badgeCode: 'VOL-14',
+    category: 'CADENCE',
+  },
+  {
+    id: 'WORDS_10000',
+    title: 'TEN-KILOWORD ARCHIVE',
+    subtitle: '10,000+ Words Read',
+    description:
+      'Accumulate at least 10,000 total words read across your neural training log.',
+    badgeCode: 'VOL-15',
+    category: 'CADENCE',
+  },
+  {
+    id: 'WORDS_25000',
+    title: 'GIGABIT READER',
+    subtitle: '25,000+ Words Read',
+    description:
+      'Accumulate at least 25,000 total words read—equivalent to a full novella.',
+    badgeCode: 'VOL-16',
+    category: 'CADENCE',
+  },
+
+  // 2. 6 TRAINING ENGINES (Per-mode participation, repetition, and mastery)
+  {
+    id: 'CHUNK_PACER_INIT',
+    title: 'CHUNK PACER ONLINE',
+    subtitle: '1st Chunk Pacer Run',
+    description:
+      'Complete your first session in 01 // CHUNK PACER mode.',
+    badgeCode: 'CHP-17',
+    category: 'ENGINES',
+  },
+  {
+    id: 'CHUNK_PACER_5',
+    title: 'FLOW PACER VETERAN',
+    subtitle: '5 Chunk Pacer Runs',
+    description:
+      'Complete 5 training sessions in 01 // CHUNK PACER mode.',
+    badgeCode: 'CHP-18',
+    category: 'ENGINES',
+  },
+  {
+    id: 'CHUNK_PACER_ACE',
+    title: 'ANTI-REGRESSION ACE',
+    subtitle: 'Chunk Pacer 200+ eWPM',
+    description:
+      'Pass a comprehension quiz at 200+ Effective WPM in 01 // CHUNK PACER mode.',
+    badgeCode: 'CHP-19',
+    category: 'ENGINES',
+  },
+  {
+    id: 'SYNTAX_SKIMMER_INIT',
+    title: 'SKELETON SCANNER',
+    subtitle: '1st Syntax Skimmer Run',
+    description:
+      'Complete your first session in 02 // SYNTAX SKIMMER mode.',
+    badgeCode: 'SKM-20',
+    category: 'ENGINES',
+  },
+  {
+    id: 'SYNTAX_SKIMMER_5',
+    title: 'GRAMMAR FILTER X5',
+    subtitle: '5 Syntax Skimmer Runs',
+    description:
+      'Complete 5 training sessions in 02 // SYNTAX SKIMMER mode.',
+    badgeCode: 'SKM-21',
+    category: 'ENGINES',
+  },
+  {
+    id: 'SYNTAX_SKIMMER_ACE',
+    title: 'S-V-O EXTRACTOR',
+    subtitle: 'Syntax Skimmer 200+ eWPM',
+    description:
+      'Pass a comprehension quiz at 200+ Effective WPM in 02 // SYNTAX SKIMMER mode.',
+    badgeCode: 'SKM-22',
+    category: 'ENGINES',
+  },
+  {
+    id: 'LEXICAL_ANCHOR_INIT',
+    title: 'PREFIX FIXATION',
+    subtitle: '1st Lexical Anchor Run',
+    description:
+      'Complete your first session in 03 // LEXICAL ANCHOR mode.',
+    badgeCode: 'LEX-23',
+    category: 'ENGINES',
+  },
+  {
+    id: 'LEXICAL_ANCHOR_5',
+    title: 'ROOT PREDICTOR X5',
+    subtitle: '5 Lexical Anchor Runs',
+    description:
+      'Complete 5 training sessions in 03 // LEXICAL ANCHOR mode.',
+    badgeCode: 'LEX-24',
+    category: 'ENGINES',
+  },
+  {
+    id: 'LEXICAL_ANCHOR_ACE',
+    title: 'PATTERN COMPLETER',
+    subtitle: 'Lexical Anchor 200+ eWPM',
+    description:
+      'Pass a comprehension quiz at 200+ Effective WPM in 03 // LEXICAL ANCHOR mode.',
+    badgeCode: 'LEX-25',
+    category: 'ENGINES',
+  },
+  {
+    id: 'SACCADE_RAIL_INIT',
+    title: 'SPIRAL STEPPER',
+    subtitle: '1st Saccade Rail Run',
+    description:
+      'Complete your first session in 04 // SACCADE RAIL (L-C-R staircase) mode.',
+    badgeCode: 'SAC-26',
+    category: 'ENGINES',
+  },
+  {
+    id: 'SACCADE_RAIL_5',
+    title: 'RHYTHMIC JUMPER X5',
+    subtitle: '5 Saccade Rail Runs',
+    description:
+      'Complete 5 training sessions in 04 // SACCADE RAIL mode.',
+    badgeCode: 'SAC-27',
+    category: 'ENGINES',
+  },
+  {
+    id: 'SACCADE_RAIL_ACE',
+    title: 'BALLISTIC SACCADE ACE',
+    subtitle: 'Saccade Rail 200+ eWPM',
+    description:
+      'Pass a comprehension quiz at 200+ Effective WPM in 04 // SACCADE RAIL mode.',
+    badgeCode: 'SAC-28',
+    category: 'ENGINES',
+  },
+  {
+    id: 'RSVP_INIT',
+    title: 'CENTER RETICLE ONLINE',
+    subtitle: '1st RSVP Stream Run',
+    description:
+      'Complete your first session in 05 // RSVP STREAM mode.',
+    badgeCode: 'RSV-29',
+    category: 'ENGINES',
+  },
+  {
+    id: 'RSVP_5',
+    title: 'ZERO-SACCADE PILOT X5',
+    subtitle: '5 RSVP Stream Runs',
+    description:
+      'Complete 5 training sessions in 05 // RSVP STREAM mode.',
+    badgeCode: 'RSV-30',
+    category: 'ENGINES',
   },
   {
     id: 'ORP_LOCKED',
     title: 'RETICLE LOCKED',
     subtitle: 'RSVP Stream 220+ eWPM',
     description:
-      'Pass a center-reticle RSVP Stream session at 220+ Effective WPM.',
-    badgeCode: 'RSV-12',
+      'Pass a center-reticle 05 // RSVP STREAM session at 220+ Effective WPM.',
+    badgeCode: 'RSV-31',
+    category: 'ENGINES',
+  },
+  {
+    id: 'TACHISTOSCOPE_INIT',
+    title: 'PERIPHERAL PROBE',
+    subtitle: '1st Tachistoscope Run',
+    description:
+      'Complete your first session in 06 // TACHISTOSCOPE mode.',
+    badgeCode: 'TCH-32',
+    category: 'ENGINES',
+  },
+  {
+    id: 'TACHISTOSCOPE_5',
+    title: 'FLASH CORTEX X5',
+    subtitle: '5 Tachistoscope Runs',
+    description:
+      'Complete 5 peripheral flash sessions in 06 // TACHISTOSCOPE mode.',
+    badgeCode: 'TCH-33',
+    category: 'ENGINES',
+  },
+  {
+    id: 'FLASH_SNAPSHOT',
+    title: 'RETINAL SNAPSHOT',
+    subtitle: 'Tachistoscope 80%+ Sync',
+    description:
+      'Complete a 06 // TACHISTOSCOPE drill with at least 80% phrase recognition accuracy.',
+    badgeCode: 'TCH-34',
+    category: 'ENGINES',
   },
   {
     id: 'TIME_COMPRESSOR',
@@ -118,15 +338,91 @@ export const ACHIEVEMENT_CATALOG: readonly AchievementDefinition[] = [
     subtitle: 'ESL Structural Mode Clear',
     description:
       'Pass a comprehension quiz in Syntax Skimmer, Lexical Anchor, or Saccade Rail mode.',
-    badgeCode: 'SYN-13',
+    badgeCode: 'ESL-35',
+    category: 'ENGINES',
   },
   {
     id: 'TRI_ENGINE_PILOT',
-    title: 'OMNI-ENGINE PILOT',
+    title: 'TRI-ENGINE PILOT',
     subtitle: '3+ Distinct Modes Verified',
     description:
       'Pass comprehension verification across at least 3 distinct training engines.',
-    badgeCode: 'OMN-14',
+    badgeCode: 'OMN-36',
+    category: 'ENGINES',
+  },
+  {
+    id: 'HEX_ENGINE_PILOT',
+    title: 'HEX-ENGINE EXPLORER',
+    subtitle: 'All 6 Modes Tried',
+    description:
+      'Complete at least 1 session in all 6 ESL training engines.',
+    badgeCode: 'OMN-37',
+    category: 'ENGINES',
+  },
+  {
+    id: 'HEX_ENGINE_MASTER',
+    title: 'OMNI-ENGINE GRANDMASTER',
+    subtitle: 'All 6 Modes Verified',
+    description:
+      'Pass comprehension verification (>=66% sync) across all 6 ESL training engines.',
+    badgeCode: 'OMN-38',
+    category: 'ENGINES',
+  },
+
+  // 3. MASTERY, ACCURACY & CORPUS EXPLORATION
+  {
+    id: 'PERFECT_SYNC',
+    title: 'PERFECT SYNAPSE',
+    subtitle: '100% Quiz Accuracy',
+    description:
+      'Score a flawless 100% comprehension sync rate on any training passage.',
+    badgeCode: 'PRF-39',
+    category: 'MASTERY',
+  },
+  {
+    id: 'PERFECT_SYNC_5',
+    title: 'HIGH-PRECISION CORTEX',
+    subtitle: '5x 100% Quiz Sessions',
+    description:
+      'Score 100% comprehension accuracy in 5 separate training sessions.',
+    badgeCode: 'PRF-40',
+    category: 'MASTERY',
+  },
+  {
+    id: 'CRITICAL_REFLEX',
+    title: 'ZERO REGRESSION FLOW',
+    subtitle: '100% Flow + 100% Sync',
+    description:
+      'Complete a passage with zero backward regressions (100% Forward Flow) and 100% quiz accuracy.',
+    badgeCode: 'FLW-41',
+    category: 'MASTERY',
+  },
+  {
+    id: 'RENAISSANCE_SYNAPSE',
+    title: 'RENAISSANCE SYNAPSE',
+    subtitle: '3+ Passages Verified',
+    description:
+      'Pass comprehension quizzes across 3 or more distinct passages in the corpus.',
+    badgeCode: 'REN-42',
+    category: 'MASTERY',
+  },
+  {
+    id: 'CORPUS_EXPLORER_6',
+    title: 'SCHOLAR OF THE MATRIX',
+    subtitle: '6+ Passages Verified',
+    description:
+      'Pass comprehension quizzes across 6 or more distinct passages in the corpus.',
+    badgeCode: 'REN-43',
+    category: 'MASTERY',
+  },
+  {
+    id: 'CORPUS_COMPLETIONIST_10',
+    title: 'ARCHIVAL COMPLETIONIST',
+    subtitle: '10+ Passages Verified',
+    description:
+      'Pass comprehension quizzes across 10 or more distinct passages.',
+    badgeCode: 'REN-44',
+    category: 'MASTERY',
   },
   {
     id: 'OVERCLOCK_MASTER',
@@ -134,15 +430,8 @@ export const ACHIEVEMENT_CATALOG: readonly AchievementDefinition[] = [
     subtitle: '3-Stage Passage Mastery',
     description:
       'Complete 3 verified mastery runs (★★★) on any single passage.',
-    badgeCode: 'OVC-15',
-  },
-  {
-    id: 'RENAISSANCE_SYNAPSE',
-    title: 'RENAISSANCE SYNAPSE',
-    subtitle: 'Cross-Domain Polymath',
-    description:
-      'Pass comprehension quizzes across 3 or more distinct passages in the corpus.',
-    badgeCode: 'REN-16',
+    badgeCode: 'OVC-45',
+    category: 'MASTERY',
   },
   {
     id: 'LIVE_WIRE',
@@ -150,15 +439,82 @@ export const ACHIEVEMENT_CATALOG: readonly AchievementDefinition[] = [
     subtitle: 'External Feed Verified',
     description:
       'Fetch and pass a live Wikipedia, Fine Arts, or Dev.to article (or custom text uplink).',
-    badgeCode: 'NET-17',
+    badgeCode: 'NET-46',
+    category: 'MASTERY',
+  },
+
+  // 4. VELOCITY TIERS (Progressive speed milestones)
+  {
+    id: 'STEADY_160',
+    title: 'CRUISING VELOCITY',
+    subtitle: '160+ eWPM Verified',
+    description:
+      'Achieve 160+ Effective WPM with verified comprehension, surpassing conversational L2 pace.',
+    badgeCode: 'VEL-47',
+    category: 'VELOCITY',
   },
   {
-    id: 'MARATHON_CORTEX',
-    title: 'MARATHON CORTEX',
-    subtitle: '5,000+ Words Processed',
+    id: 'L2_FLUENCY_TIER',
+    title: 'L2 FLUENCY TIER',
+    subtitle: '180+ eWPM Verified',
     description:
-      'Accumulate at least 5,000 total words read across your neural training log.',
-    badgeCode: 'VOL-18',
+      'Achieve 180+ Effective WPM with verified comprehension, entering the global L2 upper quartile.',
+    badgeCode: 'L2F-48',
+    category: 'VELOCITY',
+  },
+  {
+    id: 'RAPID_210',
+    title: 'RAPID INTAKE TIER',
+    subtitle: '210+ eWPM Verified',
+    description:
+      'Achieve 210+ Effective WPM with verified comprehension, closing in on native reading speed.',
+    badgeCode: 'VEL-49',
+    category: 'VELOCITY',
+  },
+  {
+    id: 'NATIVE_HORIZON',
+    title: 'NATIVE HORIZON',
+    subtitle: '238+ eWPM on Unseen Text',
+    description:
+      'Pass a comprehension quiz at 238+ eWPM (L1 native adult average) on your first attempt at a passage.',
+    badgeCode: 'NAT-50',
+    category: 'VELOCITY',
+  },
+  {
+    id: 'SUBVOCAL_BREAKER',
+    title: 'SUBVOCAL BARRIER BROKEN',
+    subtitle: '250+ eWPM Verified',
+    description:
+      'Pass a comprehension quiz with an effective reading speed of 250 eWPM or higher, surpassing vocal speech limits.',
+    badgeCode: 'SVB-51',
+    category: 'VELOCITY',
+  },
+  {
+    id: 'VELOCITY_300',
+    title: 'CORTICAL OVERDRIVE',
+    subtitle: '300+ eWPM Verified',
+    description:
+      'Reach 300+ Effective WPM with verified comprehension, entering the top 2% of global L2 readers.',
+    badgeCode: 'VEL-52',
+    category: 'VELOCITY',
+  },
+  {
+    id: 'HYPER_SACCADE',
+    title: 'HYPER-SACCADE',
+    subtitle: '350+ eWPM Elite',
+    description:
+      'Reach the elite 350+ eWPM visual intake tier with verified comprehension (top 1.5% L1 human tier).',
+    badgeCode: 'HYP-53',
+    category: 'VELOCITY',
+  },
+  {
+    id: 'APEX_400',
+    title: 'CYBERNETIC APEX',
+    subtitle: '400+ eWPM Apex',
+    description:
+      'Achieve 400+ Effective WPM with verified comprehension, reaching peak human visual intake velocity.',
+    badgeCode: 'APX-54',
+    category: 'VELOCITY',
   },
 ];
 
@@ -217,6 +573,158 @@ export const DEFAULT_PROFILE: UserProfile = {
   llmModel: 'gemma2:2b',
 };
 
+function evaluateAllAchievements(params: {
+  existingUnlocked: AchievementId[];
+  allSessions: SessionLog[];
+  totalWordsRead: number;
+  streakDays: number;
+  baselineWpm?: number;
+  passageRecords: Record<string, PassageProgress>;
+  extraGrant?: (grant: (id: AchievementId) => void) => void;
+}): {
+  unlocked: AchievementId[];
+  newlyUnlocked: AchievementId[];
+} {
+  const unlocked = new Set<AchievementId>(params.existingUnlocked);
+  const newlyUnlocked: AchievementId[] = [];
+  const grant = (id: AchievementId) => {
+    if (!unlocked.has(id)) {
+      unlocked.add(id);
+      newlyUnlocked.push(id);
+    }
+  };
+
+  const { allSessions, totalWordsRead, streakDays, baselineWpm, passageRecords } =
+    params;
+  const passedSessions = allSessions.filter(
+    (s) => s.syncRate >= QUIZ_PASS_THRESHOLD
+  );
+  const verifiedBest = passedSessions.reduce(
+    (max, s) => Math.max(max, s.effectiveWpm),
+    0
+  );
+
+  // 1. CADENCE & VOLUME
+  if (baselineWpm || allSessions.length >= 1) grant('NEURAL_CALIBRATED');
+  if (passedSessions.length >= 1) grant('FIRST_SYNC');
+  if (allSessions.length >= 3) grant('SESSION_3');
+  if (allSessions.length >= 5) grant('SESSION_5');
+  if (allSessions.length >= 10) grant('SESSION_10');
+  if (allSessions.length >= 25) grant('SESSION_25');
+  if (allSessions.length >= 50) grant('SESSION_50');
+  if (allSessions.length >= 100) grant('SESSION_100');
+
+  const distinctDays = new Set(
+    allSessions.map((s) => new Date(s.timestamp).toISOString().slice(0, 10))
+  ).size;
+  const effectiveStreak = Math.max(streakDays, distinctDays);
+  if (effectiveStreak >= 3) grant('STREAK_3');
+  if (effectiveStreak >= 7) grant('STREAK_7');
+
+  if (totalWordsRead >= 500) grant('WORDS_500');
+  if (totalWordsRead >= 1500) grant('WORDS_1500');
+  if (totalWordsRead >= 3000) grant('WORDS_3000');
+  if (totalWordsRead >= 5000) grant('MARATHON_CORTEX');
+  if (totalWordsRead >= 10000) grant('WORDS_10000');
+  if (totalWordsRead >= 25000) grant('WORDS_25000');
+
+  // 2. ENGINES (6 Training Modes)
+  const countMode = (m: SessionLog['mode']) =>
+    allSessions.filter((s) => s.mode === m).length;
+  const hasModeAce = (m: SessionLog['mode'], minWpm = 200) =>
+    passedSessions.some((s) => s.mode === m && s.effectiveWpm >= minWpm);
+
+  if (countMode('chunk_pacer') >= 1) grant('CHUNK_PACER_INIT');
+  if (countMode('chunk_pacer') >= 5) grant('CHUNK_PACER_5');
+  if (hasModeAce('chunk_pacer', 200)) grant('CHUNK_PACER_ACE');
+
+  if (countMode('syntax_skimmer') >= 1) grant('SYNTAX_SKIMMER_INIT');
+  if (countMode('syntax_skimmer') >= 5) grant('SYNTAX_SKIMMER_5');
+  if (hasModeAce('syntax_skimmer', 200)) grant('SYNTAX_SKIMMER_ACE');
+
+  if (countMode('lexical_anchor') >= 1) grant('LEXICAL_ANCHOR_INIT');
+  if (countMode('lexical_anchor') >= 5) grant('LEXICAL_ANCHOR_5');
+  if (hasModeAce('lexical_anchor', 200)) grant('LEXICAL_ANCHOR_ACE');
+
+  if (countMode('saccade_rail') >= 1) grant('SACCADE_RAIL_INIT');
+  if (countMode('saccade_rail') >= 5) grant('SACCADE_RAIL_5');
+  if (hasModeAce('saccade_rail', 200)) grant('SACCADE_RAIL_ACE');
+
+  if (countMode('rsvp') >= 1) grant('RSVP_INIT');
+  if (countMode('rsvp') >= 5) grant('RSVP_5');
+  if (hasModeAce('rsvp', 220)) grant('ORP_LOCKED');
+
+  if (countMode('tachistoscope') >= 1) grant('TACHISTOSCOPE_INIT');
+  if (countMode('tachistoscope') >= 5) grant('TACHISTOSCOPE_5');
+  if (allSessions.some((s) => s.mode === 'tachistoscope' && s.syncRate >= 0.8)) {
+    grant('FLASH_SNAPSHOT');
+  }
+
+  if (
+    passedSessions.some(
+      (s) =>
+        s.mode === 'syntax_skimmer' ||
+        s.mode === 'lexical_anchor' ||
+        s.mode === 'saccade_rail'
+    )
+  ) {
+    grant('TIME_COMPRESSOR');
+  }
+
+  const allModesTried = new Set(allSessions.map((s) => s.mode));
+  const passedModes = new Set(passedSessions.map((s) => s.mode));
+  if (passedModes.size >= 3) grant('TRI_ENGINE_PILOT');
+  if (allModesTried.size >= 6) grant('HEX_ENGINE_PILOT');
+  if (passedModes.size >= 6) grant('HEX_ENGINE_MASTER');
+
+  // 3. MASTERY & CORPUS
+  const perfectSyncSessions = allSessions.filter((s) => s.syncRate >= 0.99);
+  if (perfectSyncSessions.length >= 1) grant('PERFECT_SYNC');
+  if (perfectSyncSessions.length >= 5) grant('PERFECT_SYNC_5');
+  if (
+    allSessions.some((s) => s.syncRate >= 0.99 && s.forwardFlowRate >= 0.995)
+  ) {
+    grant('CRITICAL_REFLEX');
+  }
+
+  const passedPassages = new Set(passedSessions.map((s) => s.passageId));
+  if (passedPassages.size >= 3) grant('RENAISSANCE_SYNAPSE');
+  if (passedPassages.size >= 6) grant('CORPUS_EXPLORER_6');
+  if (passedPassages.size >= 10) grant('CORPUS_COMPLETIONIST_10');
+
+  if (Object.values(passageRecords).some((r) => r.stageCompleted >= 3)) {
+    grant('OVERCLOCK_MASTER');
+  }
+  if (
+    passedSessions.some(
+      (s) =>
+        s.passageId.startsWith('wikipedia-') ||
+        s.passageId.startsWith('devto-') ||
+        s.passageId.startsWith('custom-')
+    )
+  ) {
+    grant('LIVE_WIRE');
+  }
+
+  // 4. VELOCITY TIERS
+  if (verifiedBest >= 160) grant('STEADY_160');
+  if (verifiedBest >= 180) grant('L2_FLUENCY_TIER');
+  if (verifiedBest >= 210) grant('RAPID_210');
+  if (verifiedBest >= 250) grant('SUBVOCAL_BREAKER');
+  if (verifiedBest >= 300) grant('VELOCITY_300');
+  if (verifiedBest >= 350) grant('HYPER_SACCADE');
+  if (verifiedBest >= 400) grant('APEX_400');
+
+  if (params.extraGrant) {
+    params.extraGrant(grant);
+  }
+
+  return {
+    unlocked: Array.from(unlocked),
+    newlyUnlocked,
+  };
+}
+
 export async function getOrInitProfile(): Promise<UserProfile> {
   const [existing, allSessions] = await Promise.all([
     db.profiles.get('default'),
@@ -243,76 +751,20 @@ export async function getOrInitProfile(): Promise<UserProfile> {
       ? INITIAL_DEFAULT_WPM
       : existing.currentTargetWpm || INITIAL_DEFAULT_WPM;
 
-    // Retroactively ensure any newly added achievements earned in past sessions are unlocked
-    const unlocked = new Set<AchievementId>(
-      existing.unlockedAchievements || []
-    );
-    if (existing.baselineWpm) unlocked.add('NEURAL_CALIBRATED');
-    if (passedSessions.length >= 1) unlocked.add('FIRST_SYNC');
-    if (verifiedBest >= 180) unlocked.add('L2_FLUENCY_TIER');
-    if (verifiedBest >= 250) unlocked.add('SUBVOCAL_BREAKER');
-    if (verifiedBest >= 300) unlocked.add('VELOCITY_300');
-    if (verifiedBest >= 350) unlocked.add('HYPER_SACCADE');
-    if (verifiedBest >= 400) unlocked.add('APEX_400');
-    if (allSessions.some((s) => s.syncRate >= 0.99)) {
-      unlocked.add('PERFECT_SYNC');
-    }
-    if (
-      allSessions.some((s) => s.syncRate >= 0.99 && s.forwardFlowRate >= 0.995)
-    ) {
-      unlocked.add('CRITICAL_REFLEX');
-    }
-    if (
-      allSessions.some((s) => s.mode === 'tachistoscope' && s.syncRate >= 0.8)
-    ) {
-      unlocked.add('FLASH_SNAPSHOT');
-    }
-    if (passedSessions.some((s) => s.mode === 'rsvp' && s.effectiveWpm >= 220)) {
-      unlocked.add('ORP_LOCKED');
-    }
-    if (
-      passedSessions.some(
-        (s) =>
-          s.mode === 'syntax_skimmer' ||
-          s.mode === 'lexical_anchor' ||
-          s.mode === 'saccade_rail'
-      )
-    ) {
-      unlocked.add('TIME_COMPRESSOR');
-    }
-    const passedModes = new Set(passedSessions.map((s) => s.mode));
-    if (passedModes.size >= 3) {
-      unlocked.add('TRI_ENGINE_PILOT');
-    }
-    if (
-      Object.values(existing.passageRecords || {}).some(
-        (r) => r.stageCompleted >= 3
-      )
-    ) {
-      unlocked.add('OVERCLOCK_MASTER');
-    }
-    if (new Set(passedSessions.map((s) => s.passageId)).size >= 3) {
-      unlocked.add('RENAISSANCE_SYNAPSE');
-    }
-    if (
-      passedSessions.some(
-        (s) =>
-          s.passageId.startsWith('wikipedia-') ||
-          s.passageId.startsWith('devto-') ||
-          s.passageId.startsWith('custom-')
-      )
-    ) {
-      unlocked.add('LIVE_WIRE');
-    }
-    if (existing.totalWordsRead >= 5000) {
-      unlocked.add('MARATHON_CORTEX');
-    }
+    const { unlocked } = evaluateAllAchievements({
+      existingUnlocked: existing.unlockedAchievements || [],
+      allSessions,
+      totalWordsRead: existing.totalWordsRead,
+      streakDays: existing.streakDays || 1,
+      baselineWpm: existing.baselineWpm,
+      passageRecords: existing.passageRecords || {},
+    });
 
     const normalized: UserProfile = {
       ...existing,
       currentTargetWpm: migratedTargetWpm,
       bestEffectiveWpm: verifiedBest,
-      unlockedAchievements: Array.from(unlocked),
+      unlockedAchievements: unlocked,
       passageRecords: existing.passageRecords || {},
     };
     await db.profiles.put(normalized);
@@ -343,9 +795,13 @@ export async function recordSessionAndUpdateProfile(
   updatedPassageRecord: PassageProgress;
   newlyUnlocked: AchievementId[];
 }> {
-  await db.sessions.put(session);
   const profile = await getOrInitProfile();
+  await db.sessions.put(session);
+  const allSessions = await db.sessions.toArray();
   const today = new Date().toISOString().slice(0, 10);
+  const yesterday = new Date(Date.now() - 86_400_000)
+    .toISOString()
+    .slice(0, 10);
   const quizPassed = session.syncRate >= QUIZ_PASS_THRESHOLD;
 
   const records: Record<string, PassageProgress> = {
@@ -395,103 +851,42 @@ export async function recordSessionAndUpdateProfile(
 
   records[session.passageId] = updatedPassageRecord;
 
-  // Evaluate Achievements
-  const unlocked = new Set<AchievementId>(profile.unlockedAchievements || []);
-  const newlyUnlocked: AchievementId[] = [];
-  const grant = (id: AchievementId) => {
-    if (!unlocked.has(id)) {
-      unlocked.add(id);
-      newlyUnlocked.push(id);
-    }
-  };
-
   const nextTotalWordsRead = profile.totalWordsRead + wordsRead;
   const nextBaselineWpm =
     profile.baselineWpm ||
     Math.max(80, Math.min(600, Math.round(session.rawWpm)));
+  const nextStreakDays =
+    profile.lastActiveDate === today
+      ? profile.streakDays || 1
+      : profile.lastActiveDate === yesterday
+      ? (profile.streakDays || 1) + 1
+      : 1;
 
-  grant('NEURAL_CALIBRATED');
-  if (quizPassed) {
-    grant('FIRST_SYNC');
-  }
-  if (quizPassed && session.effectiveWpm >= 180) {
-    grant('L2_FLUENCY_TIER');
-  }
-  if (
-    wasFirstAttemptOnPassage &&
-    quizPassed &&
-    session.effectiveWpm >= 238
-  ) {
-    grant('NATIVE_HORIZON');
-  }
-  if (quizPassed && session.effectiveWpm >= 250) {
-    grant('SUBVOCAL_BREAKER');
-  }
-  if (quizPassed && session.effectiveWpm >= 300) {
-    grant('VELOCITY_300');
-  }
-  if (quizPassed && session.effectiveWpm >= 350) {
-    grant('HYPER_SACCADE');
-  }
-  if (quizPassed && session.effectiveWpm >= 400) {
-    grant('APEX_400');
-  }
-  if (session.syncRate >= 0.99) {
-    grant('PERFECT_SYNC');
-  }
-  if (session.syncRate >= 0.99 && session.forwardFlowRate >= 0.995) {
-    grant('CRITICAL_REFLEX');
-  }
-  if (session.mode === 'tachistoscope' && session.syncRate >= 0.8) {
-    grant('FLASH_SNAPSHOT');
-  }
-  if (quizPassed && session.mode === 'rsvp' && session.effectiveWpm >= 220) {
-    grant('ORP_LOCKED');
-  }
-  if (
-    quizPassed &&
-    (session.mode === 'syntax_skimmer' ||
-      session.mode === 'lexical_anchor' ||
-      session.mode === 'saccade_rail')
-  ) {
-    grant('TIME_COMPRESSOR');
-  }
-  if (nextStageCompleted >= 3) {
-    grant('OVERCLOCK_MASTER');
-  }
-  if (
-    quizPassed &&
-    (session.passageId.startsWith('wikipedia-') ||
-      session.passageId.startsWith('devto-') ||
-      session.passageId.startsWith('custom-') ||
-      passageCategory === 'WIKIPEDIA' ||
-      passageCategory === 'DEV_TO' ||
-      passageCategory === 'CUSTOM')
-  ) {
-    grant('LIVE_WIRE');
-  }
-  if (nextTotalWordsRead >= 5000) {
-    grant('MARATHON_CORTEX');
-  }
-
-  // Check multi-session achievements (RENAISSANCE_SYNAPSE & TRI_ENGINE_PILOT)
-  if (
-    quizPassed &&
-    (!unlocked.has('RENAISSANCE_SYNAPSE') || !unlocked.has('TRI_ENGINE_PILOT'))
-  ) {
-    const allSessions = await db.sessions.toArray();
-    const passedList = allSessions.filter(
-      (s) => s.syncRate >= QUIZ_PASS_THRESHOLD
-    );
-    const passedIds = new Set(passedList.map((s) => s.passageId));
-    if (passedIds.size >= 3) {
-      grant('RENAISSANCE_SYNAPSE');
-    }
-    const passedModes = new Set(passedList.map((s) => s.mode));
-    if (passedModes.size >= 3) {
-      grant('TRI_ENGINE_PILOT');
-    }
-  }
+  const { unlocked, newlyUnlocked } = evaluateAllAchievements({
+    existingUnlocked: profile.unlockedAchievements || [],
+    allSessions,
+    totalWordsRead: nextTotalWordsRead,
+    streakDays: nextStreakDays,
+    baselineWpm: nextBaselineWpm,
+    passageRecords: records,
+    extraGrant: (grant) => {
+      if (
+        wasFirstAttemptOnPassage &&
+        quizPassed &&
+        session.effectiveWpm >= 238
+      ) {
+        grant('NATIVE_HORIZON');
+      }
+      if (
+        quizPassed &&
+        (passageCategory === 'WIKIPEDIA' ||
+          passageCategory === 'DEV_TO' ||
+          passageCategory === 'CUSTOM')
+      ) {
+        grant('LIVE_WIRE');
+      }
+    },
+  });
 
   const updated: UserProfile = {
     ...profile,
@@ -501,8 +896,9 @@ export async function recordSessionAndUpdateProfile(
       ? Math.max(profile.bestEffectiveWpm, session.effectiveWpm)
       : profile.bestEffectiveWpm,
     totalWordsRead: nextTotalWordsRead,
+    streakDays: nextStreakDays,
     lastActiveDate: today,
-    unlockedAchievements: Array.from(unlocked),
+    unlockedAchievements: unlocked,
     passageRecords: records,
   };
 
