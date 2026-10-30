@@ -297,26 +297,49 @@ export function ReadingScreen({
   onStartQuizPhase,
   onCompleteTachistoscope,
 }: ReadingScreenProps) {
-  const activeSaccadeRowRef = useRef<HTMLDivElement | null>(null);
+  const activeChunkRef = useRef<HTMLElement | null>(null);
+  const stickyHudRef = useRef<HTMLDivElement | null>(null);
   const chunkDelta = activeChunkIndex - ghostChunkIndex;
   const hasCustomGhostWeights = Boolean(
     profile.passageRecords?.[selectedPassage.id]?.bestChunkWeights?.length
   );
 
+  // Keep the active chunk comfortably visible below the sticky HUD as the user advances
   useEffect(() => {
-    if (selectedMode === 'saccade_rail' && activeSaccadeRowRef.current) {
-      activeSaccadeRowRef.current.scrollIntoView({
-        block: 'center',
+    if (
+      selectedMode === 'tachistoscope' ||
+      selectedMode === 'rsvp' ||
+      !activeChunkRef.current
+    ) {
+      return;
+    }
+    const el = activeChunkRef.current;
+    const rect = el.getBoundingClientRect();
+    const hudBottom =
+      stickyHudRef.current?.getBoundingClientRect().bottom ?? 220;
+    const topThreshold = hudBottom + 28;
+    const bottomThreshold = window.innerHeight - 120;
+
+    if (rect.top < topThreshold || rect.bottom > bottomThreshold) {
+      const targetScrollY =
+        window.scrollY +
+        rect.top -
+        Math.max(topThreshold + 24, (window.innerHeight + hudBottom) * 0.42);
+      window.scrollTo({
+        top: Math.max(0, targetScrollY),
         behavior: 'smooth',
       });
     }
   }, [selectedMode, activeChunkIndex]);
 
   return (
-    <main className="flex-1 max-w-4xl w-full mx-auto px-4 py-6 flex flex-col justify-between gap-5 relative z-20">
-      {/* Top Reading Control Bar & Ghost Racing Bar */}
-      <div className="space-y-2.5">
-        <div className="flex flex-wrap items-center justify-between gap-3 bg-[#180B29] border border-[#00F5D4]/40 px-4 py-2.5 font-terminal text-xs">
+    <main className="flex-1 max-w-4xl w-full mx-auto px-4 pb-8 flex flex-col justify-between gap-4 relative z-20">
+      {/* Sticky Upper HUD: Control Bar + Ghost Racing Bar + Mode Status & Legend */}
+      <div
+        ref={stickyHudRef}
+        className="sticky top-14 z-30 bg-[#0D0618]/95 backdrop-blur-md pt-3 pb-2.5 border-b border-[#00F5D4]/25 space-y-2"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-3 bg-[#180B29] border border-[#00F5D4]/40 px-4 py-2 font-terminal text-xs">
           <div className="flex items-center gap-3">
             <button
               type="button"
@@ -419,9 +442,131 @@ export function ReadingScreen({
             resetKey={sessionResetKey}
           />
         )}
+
+        {/* Sticky Double-Cursor Status & Mode-Specific Header */}
+        {selectedMode !== 'tachistoscope' && (
+          <div className="px-3 py-2 bg-[#180B29]/90 border border-[#00F5D4]/30 font-terminal text-[10px] space-y-1.5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-3">
+                <span className="text-[#00F5D4] font-bold">
+                  ■ YOU ({activeChunkIndex + 1}/{selectedPassage.chunks.length})
+                </span>
+                {hasGhost ? (
+                  <span className="text-[#FFE600] font-bold">
+                    ▫ {hasCustomGhostWeights ? 'PB GHOST' : 'GHOST'} (
+                    {hasStartedPacing
+                      ? `${ghostChunkIndex + 1}/${selectedPassage.chunks.length} @ ${activeWpm} WPM`
+                      : `STANDBY @ ${activeWpm} WPM`}
+                    )
+                  </span>
+                ) : (
+                  <span className="text-[#FFE600] font-bold">
+                    ◌ NO GHOST YET (READ AT YOUR OWN PACE TO GENERATE GHOST)
+                  </span>
+                )}
+              </div>
+              {!hasStartedPacing ? (
+                <span className="px-2 py-0.5 border border-[#FFE600] bg-[#FFE600]/20 text-[#FFE600] font-bold flex items-center gap-1 animate-pulse">
+                  <MousePointerClick className="w-3 h-3" />
+                  <span>TAP / SPACE TO START</span>
+                </span>
+              ) : hasGhost ? (
+                <span
+                  className={`px-2 py-0.5 border font-bold ${
+                    chunkDelta > 0
+                      ? 'border-[#00F5D4]/60 bg-[#00F5D4]/15 text-[#00F5D4]'
+                      : chunkDelta === 0
+                      ? 'border-[#FFE600]/60 bg-[#FFE600]/15 text-[#FFE600]'
+                      : 'border-[#FF1E7A]/60 bg-[#FF1E7A]/15 text-[#FF1E7A]'
+                  }`}
+                >
+                  {chunkDelta > 0
+                    ? `▲ +${chunkDelta} AHEAD OF GHOST`
+                    : chunkDelta === 0
+                    ? '● NECK & NECK WITH GHOST'
+                    : `▼ ${chunkDelta} BEHIND GHOST`}
+                </span>
+              ) : (
+                <span className="px-2 py-0.5 border border-[#00F5D4]/50 bg-[#00F5D4]/10 text-[#00F5D4] font-bold">
+                  ● RECORDING GHOST PACE
+                </span>
+              )}
+            </div>
+
+            {selectedMode === 'saccade_rail' && (
+              <div className="grid grid-cols-3 gap-2 pt-1.5 border-t border-[#00F5D4]/20 text-[#6C7A89]">
+                {[
+                  { label: 'RAIL L // STEP 01', align: 'items-start text-left' },
+                  {
+                    label: 'RAIL C // STEP 02',
+                    align: 'items-center text-center',
+                  },
+                  { label: 'RAIL R // STEP 03', align: 'items-end text-right' },
+                ].map((rail, colIdx) => {
+                  const isCurrentCol = activeChunkIndex % 3 === colIdx;
+                  return (
+                    <div
+                      key={rail.label}
+                      className={`flex items-center gap-1.5 ${
+                        colIdx === 1
+                          ? 'justify-center'
+                          : colIdx === 2
+                          ? 'justify-end'
+                          : 'justify-start'
+                      } transition-colors ${
+                        isCurrentCol
+                          ? 'text-[#00F5D4] font-bold'
+                          : 'text-[#6C7A89]'
+                      }`}
+                    >
+                      <div
+                        className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                          isCurrentCol
+                            ? 'bg-[#00F5D4] shadow-[0_0_8px_#00F5D4]'
+                            : 'bg-[#6C7A89]/40'
+                        }`}
+                      />
+                      <span>{rail.label}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {selectedMode === 'syntax_skimmer' && (
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-1.5 border-t border-[#00F5D4]/20 text-[#6C7A89]">
+                <span>
+                  SYNTAX SKIMMER // FOCUS ON CONTENT WORDS &amp; LOGIC PIVOTS
+                </span>
+                <div className="flex items-center gap-3">
+                  <span className="text-[#00F5D4] font-bold">
+                    ■ CONTENT (S-V-O)
+                  </span>
+                  <span className="text-[#FF1E7A] font-bold">
+                    ■ LOGIC PIVOT
+                  </span>
+                  <span className="text-[#6C7A89]/60">□ FUNCTION (SKIP)</span>
+                </div>
+              </div>
+            )}
+
+            {selectedMode === 'lexical_anchor' && (
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-1.5 border-t border-[#00F5D4]/20 text-[#6C7A89]">
+                <span>
+                  LEXICAL ANCHOR // FIXATE ON BOLD ROOT PREFIXES &amp; PREDICT
+                  SUFFIXES
+                </span>
+                <span className="text-[#00F5D4] font-bold">
+                  <strong className="text-[#00F5D4]">ANCH</strong>
+                  <span className="opacity-45">OR PREDICTION</span>
+                </span>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
-      {/* Center Reading Viewport */}
+      {/* Scrollable Reading Body & Bottom Controls */}
       {selectedMode === 'tachistoscope' ? (
         <TachistoscopeView
           passage={selectedPassage}
@@ -435,54 +580,6 @@ export function ReadingScreen({
           className="flex-1 flex flex-col justify-center"
           innerClassName="justify-center p-6 sm:p-10"
         >
-          {/* Double-Cursor Status Header */}
-          <div className="flex flex-wrap items-center justify-between gap-2 pb-3 mb-4 border-b border-[#00F5D4]/20 font-terminal text-[10px]">
-            <div className="flex items-center gap-3">
-              <span className="text-[#00F5D4] font-bold">
-                ■ YOU ({activeChunkIndex + 1}/{selectedPassage.chunks.length})
-              </span>
-              {hasGhost ? (
-                <span className="text-[#FFE600] font-bold">
-                  ▫ {hasCustomGhostWeights ? 'PB GHOST' : 'GHOST'} (
-                  {hasStartedPacing
-                    ? `${ghostChunkIndex + 1}/${selectedPassage.chunks.length} @ ${activeWpm} WPM`
-                    : `STANDBY @ ${activeWpm} WPM`}
-                  )
-                </span>
-              ) : (
-                <span className="text-[#FFE600] font-bold">
-                  ◌ NO GHOST YET (READ AT YOUR OWN PACE TO GENERATE GHOST)
-                </span>
-              )}
-            </div>
-            {!hasStartedPacing ? (
-              <span className="px-2 py-0.5 border border-[#FFE600] bg-[#FFE600]/20 text-[#FFE600] font-bold flex items-center gap-1 animate-pulse">
-                <MousePointerClick className="w-3 h-3" />
-                <span>TAP / SPACE TO START</span>
-              </span>
-            ) : hasGhost ? (
-              <span
-                className={`px-2 py-0.5 border font-bold ${
-                  chunkDelta > 0
-                    ? 'border-[#00F5D4]/60 bg-[#00F5D4]/15 text-[#00F5D4]'
-                    : chunkDelta === 0
-                    ? 'border-[#FFE600]/60 bg-[#FFE600]/15 text-[#FFE600]'
-                    : 'border-[#FF1E7A]/60 bg-[#FF1E7A]/15 text-[#FF1E7A]'
-                }`}
-              >
-                {chunkDelta > 0
-                  ? `▲ +${chunkDelta} AHEAD OF GHOST`
-                  : chunkDelta === 0
-                  ? '● NECK & NECK WITH GHOST'
-                  : `▼ ${chunkDelta} BEHIND GHOST`}
-              </span>
-            ) : (
-              <span className="px-2 py-0.5 border border-[#00F5D4]/50 bg-[#00F5D4]/10 text-[#00F5D4] font-bold">
-                ● RECORDING GHOST PACE
-              </span>
-            )}
-          </div>
-
           {selectedMode === 'rsvp' ? (
             <div
               onClick={onAdvanceChunk}
@@ -506,136 +603,74 @@ export function ReadingScreen({
           ) : selectedMode === 'saccade_rail' ? (
             <div
               onClick={onAdvanceChunk}
-              className="space-y-3 cursor-pointer"
+              className="space-y-1.5 cursor-pointer px-2 sm:px-4 select-none relative"
             >
-              {/* 3-Position Spiral Staircase Rail Header */}
-              <div className="grid grid-cols-3 gap-2 font-terminal text-[10px] text-[#6C7A89] border-b border-[#00F5D4]/20 pb-2">
-                {[
-                  { label: 'RAIL L // STEP 01', align: 'items-start text-left' },
-                  { label: 'RAIL C // STEP 02', align: 'items-center text-center' },
-                  { label: 'RAIL R // STEP 03', align: 'items-end text-right' },
-                ].map((rail, colIdx) => {
-                  const isCurrentCol = activeChunkIndex % 3 === colIdx;
-                  return (
-                    <div
-                      key={rail.label}
-                      className={`flex flex-col ${rail.align} gap-1 transition-colors ${
-                        isCurrentCol
-                          ? 'text-[#00F5D4] font-bold'
-                          : 'text-[#6C7A89]'
-                      }`}
-                    >
-                      <span>{rail.label}</span>
-                      <div
-                        className={`w-1.5 h-1.5 rounded-full ${
-                          isCurrentCol
-                            ? 'bg-[#00F5D4] shadow-[0_0_8px_#00F5D4]'
-                            : 'bg-[#6C7A89]/40'
-                        }`}
-                      />
-                    </div>
-                  );
-                })}
-              </div>
-
               {/* Stepped Spiral Staircase Lines (Left -> Next Line Center -> Next Line Right) */}
-              <div className="max-h-[48vh] overflow-y-auto px-2 sm:px-4 space-y-1.5 select-none relative">
-                {selectedPassage.chunks.map((chunk, idx) => {
-                  const colIdx = idx % 3;
-                  const isActive = idx === activeChunkIndex;
-                  const isGhost =
-                    hasGhost && hasStartedPacing && idx === ghostChunkIndex;
-                  const isPassed = idx < activeChunkIndex;
-                  const isCurrentCycle =
-                    Math.floor(idx / 3) === Math.floor(activeChunkIndex / 3);
-                  const isMarker =
-                    selectedPassage.discourseMarkerIndices.includes(idx);
+              {selectedPassage.chunks.map((chunk, idx) => {
+                const colIdx = idx % 3;
+                const isActive = idx === activeChunkIndex;
+                const isGhost =
+                  hasGhost && hasStartedPacing && idx === ghostChunkIndex;
+                const isPassed = idx < activeChunkIndex;
+                const isCurrentCycle =
+                  Math.floor(idx / 3) === Math.floor(activeChunkIndex / 3);
+                const isMarker =
+                  selectedPassage.discourseMarkerIndices.includes(idx);
 
-                  const justifyClass =
-                    colIdx === 0
-                      ? 'justify-start text-left'
-                      : colIdx === 1
-                      ? 'justify-center text-center'
-                      : 'justify-end text-right';
+                const justifyClass =
+                  colIdx === 0
+                    ? 'justify-start text-left'
+                    : colIdx === 1
+                    ? 'justify-center text-center'
+                    : 'justify-end text-right';
 
-                  return (
-                    <div
-                      key={idx}
-                      ref={isActive ? activeSaccadeRowRef : undefined}
-                      style={{
-                        opacity:
-                          isPassed && !isGhost && fadeOutPassed ? 0.16 : 1,
-                      }}
-                      className={`flex ${justifyClass} py-1 transition-colors ${
-                        colIdx === 2 && idx < selectedPassage.chunks.length - 1
-                          ? 'border-b border-[#00F5D4]/10 pb-2.5 mb-1'
-                          : ''
+                return (
+                  <div
+                    key={idx}
+                    ref={isActive ? (el) => { activeChunkRef.current = el; } : undefined}
+                    style={{
+                      opacity:
+                        isPassed && !isGhost && fadeOutPassed ? 0.16 : 1,
+                    }}
+                    className={`flex ${justifyClass} py-1 transition-colors ${
+                      colIdx === 2 && idx < selectedPassage.chunks.length - 1
+                        ? 'border-b border-[#00F5D4]/10 pb-2.5 mb-1'
+                        : ''
+                    }`}
+                  >
+                    <span
+                      title="Click anywhere or press SPACE to advance chunk"
+                      className={`relative inline-block whitespace-nowrap px-2.5 py-0.5 border-b-2 text-base sm:text-xl font-medium cursor-pointer transition-colors duration-75 ${
+                        isActive && isGhost
+                          ? 'bg-[#00F5D4]/20 border-[#00F5D4] border-t-2 border-t-[#FFE600] text-[#F2F5F8]'
+                          : isActive
+                          ? isMarker
+                            ? 'bg-[#FF1E7A]/20 border-[#FF1E7A] text-[#F2F5F8]'
+                            : 'bg-[#00F5D4]/20 border-[#00F5D4] text-[#F2F5F8]'
+                          : isGhost
+                          ? 'bg-[#FFE600]/15 border-dashed border-[#FFE600] text-[#FFE600]'
+                          : isCurrentCycle
+                          ? 'bg-[#180B29]/50 border-transparent text-[#F2F5F8]/80'
+                          : 'border-transparent text-[#6C7A89]'
                       }`}
                     >
-                      <span
-                        title="Click anywhere or press SPACE to advance chunk"
-                        className={`relative inline-block whitespace-nowrap px-2.5 py-0.5 border-b-2 text-base sm:text-xl font-medium cursor-pointer transition-colors duration-75 ${
-                          isActive && isGhost
-                            ? 'bg-[#00F5D4]/20 border-[#00F5D4] border-t-2 border-t-[#FFE600] text-[#F2F5F8]'
-                            : isActive
-                            ? isMarker
-                              ? 'bg-[#FF1E7A]/20 border-[#FF1E7A] text-[#F2F5F8]'
-                              : 'bg-[#00F5D4]/20 border-[#00F5D4] text-[#F2F5F8]'
-                            : isGhost
-                            ? 'bg-[#FFE600]/15 border-dashed border-[#FFE600] text-[#FFE600]'
-                            : isCurrentCycle
-                            ? 'bg-[#180B29]/50 border-transparent text-[#F2F5F8]/80'
-                            : 'border-transparent text-[#6C7A89]'
-                        }`}
-                      >
-                        {chunk}
-                        {idx === 0 && !hasStartedPacing && (
-                          <span className="pointer-events-none absolute left-full ml-2 top-1/2 -translate-y-1/2 z-20 inline-flex items-center gap-1 px-2 py-0.5 bg-[#FFE600] text-[#0D0618] font-terminal text-[10px] leading-none font-extrabold whitespace-nowrap animate-pulse shadow-[0_0_12px_rgba(255,230,0,0.5)]">
-                            <MousePointerClick className="w-3 h-3" />
-                            <span>TAP / SPACE</span>
-                          </span>
-                        )}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
+                      {chunk}
+                      {idx === 0 && !hasStartedPacing && (
+                        <span className="pointer-events-none absolute left-full ml-2 top-1/2 -translate-y-1/2 z-20 inline-flex items-center gap-1 px-2 py-0.5 bg-[#FFE600] text-[#0D0618] font-terminal text-[10px] leading-none font-extrabold whitespace-nowrap animate-pulse shadow-[0_0_12px_rgba(255,230,0,0.5)]">
+                          <MousePointerClick className="w-3 h-3" />
+                          <span>TAP / SPACE</span>
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
           ) : (
             <div
               onClick={onAdvanceChunk}
               className="space-y-4 cursor-pointer"
             >
-              {selectedMode === 'syntax_skimmer' && (
-                <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-[#00F5D4]/20 font-terminal text-[10px] text-[#6C7A89]">
-                  <span>
-                    SYNTAX SKIMMER // FOCUS ON CONTENT WORDS &amp; LOGIC PIVOTS
-                  </span>
-                  <div className="flex items-center gap-3">
-                    <span className="text-[#00F5D4] font-bold">
-                      ■ CONTENT (S-V-O)
-                    </span>
-                    <span className="text-[#FF1E7A] font-bold">
-                      ■ LOGIC PIVOT
-                    </span>
-                    <span className="text-[#6C7A89]/60">□ FUNCTION (SKIP)</span>
-                  </div>
-                </div>
-              )}
-
-              {selectedMode === 'lexical_anchor' && (
-                <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-[#00F5D4]/20 font-terminal text-[10px] text-[#6C7A89]">
-                  <span>
-                    LEXICAL ANCHOR // FIXATE ON BOLD ROOT PREFIXES &amp; PREDICT
-                    SUFFIXES
-                  </span>
-                  <span className="text-[#00F5D4] font-bold">
-                    <strong className="text-[#00F5D4]">ANCH</strong>
-                    <span className="opacity-45">OR PREDICTION</span>
-                  </span>
-                </div>
-              )}
-
               <div className="pretty-text leading-[2.2] text-lg sm:text-xl font-medium select-none">
                 {selectedPassage.chunks.map((chunk, idx) => {
                   const isActive = idx === activeChunkIndex;
@@ -646,7 +681,11 @@ export function ReadingScreen({
                     selectedPassage.discourseMarkerIndices.includes(idx);
 
                   return (
-                    <span key={idx} className="relative inline">
+                    <span
+                      key={idx}
+                      ref={isActive ? (el) => { activeChunkRef.current = el; } : undefined}
+                      className="relative inline"
+                    >
                       {idx === 0 && !hasStartedPacing && (
                         <span className="pointer-events-none absolute -top-5 left-0 z-20 inline-flex items-center gap-1 px-1.5 py-0.5 bg-[#FFE600] text-[#0D0618] font-terminal text-[9px] leading-none font-extrabold whitespace-nowrap animate-pulse shadow-[0_0_12px_rgba(255,230,0,0.5)]">
                           <MousePointerClick className="w-2.5 h-2.5" />
