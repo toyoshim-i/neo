@@ -1,7 +1,6 @@
 import {
   CheckCircle2,
   ChevronRight,
-  Languages,
   XCircle,
 } from 'lucide-react';
 import { QuizQuestion, TrainingPassage } from '../../types/schema';
@@ -17,13 +16,6 @@ interface QuizScreenProps {
   selectedOption: number | null;
   onSelectQuizOption: (idx: number) => void;
   onNextQuizStep: () => void;
-  onTranslateChunkOrWord: (
-    queryText: string,
-    chunkIdx: number,
-    baseChunkText?: string,
-    anchorRect?: { x: number; top: number; bottom: number },
-    overrideContextSentence?: string
-  ) => void;
 }
 
 export function QuizScreen({
@@ -35,7 +27,6 @@ export function QuizScreen({
   selectedOption,
   onSelectQuizOption,
   onNextQuizStep,
-  onTranslateChunkOrWord,
 }: QuizScreenProps) {
   const quizList =
     activeQuizQuestions.length > 0
@@ -54,18 +45,9 @@ export function QuizScreen({
         title={`COMPREHENSION CHECK // QUESTION ${quizIndex + 1} OF ${
           quizList.length
         }`}
-        rightSlot={
-          <span className="text-[#00F5D4] flex items-center gap-1 text-[10px]">
-            <Languages className="w-3 h-3" />
-            <span>TAP WORDS TO TRANSLATE</span>
-          </span>
-        }
       >
         <div className="p-6 space-y-5">
-          <h2
-            title="Tap any word to translate"
-            className="text-base sm:text-lg font-bold text-[#F2F5F8] leading-relaxed whitespace-pre-line cursor-pointer"
-          >
+          <h2 className="text-base sm:text-lg font-bold text-[#F2F5F8] leading-relaxed whitespace-pre-line">
             {q.question.replace(/:\s+"/, ':\n"')}
           </h2>
 
@@ -101,40 +83,6 @@ export function QuizScreen({
                     0{idx + 1}
                   </span>
                   <span className="flex-1">{opt}</span>
-                  {selectedOption === null && (
-                    <span
-                      role="button"
-                      tabIndex={0}
-                      title="Translate option"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        const rect = e.currentTarget.getBoundingClientRect();
-                        const cleanOpt = opt.replace(
-                          /^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g,
-                          ''
-                        );
-                        onTranslateChunkOrWord(
-                          cleanOpt || opt,
-                          -1,
-                          opt,
-                          {
-                            x: rect.left + rect.width / 2,
-                            top: rect.top,
-                            bottom: rect.bottom,
-                          },
-                          `${q.question} — ${opt}`
-                        );
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.stopPropagation();
-                        }
-                      }}
-                      className="p-1 text-[#6C7A89] hover:text-[#00F5D4] border border-transparent hover:border-[#00F5D4]/50 bg-[#180B29] shrink-0"
-                    >
-                      <Languages className="w-3.5 h-3.5" />
-                    </span>
-                  )}
                   {selectedOption !== null && isCorrectOption && (
                     <CheckCircle2 className="w-4 h-4 text-[#00F5D4] shrink-0 mt-0.5" />
                   )}

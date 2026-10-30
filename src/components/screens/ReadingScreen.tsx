@@ -2,7 +2,6 @@ import { useEffect, useRef } from 'react';
 import {
   ArrowLeft,
   ChevronRight,
-  Languages,
   MousePointerClick,
   Pause,
   Play,
@@ -124,20 +123,12 @@ interface ReadingScreenProps {
   activeWpm: number;
   activeChunkIndex: number;
   ghostChunkIndex: number;
-  setActiveChunkIndex: (idx: number) => void;
   onAdvanceChunk: () => void;
   isPlaying: boolean;
   fadeOutPassed: boolean;
   sessionResetKey: number;
   onAbort: () => void;
   onTogglePlayPause: () => void;
-  onIncrementRegression: () => void;
-  onTranslateChunkOrWord: (
-    queryText: string,
-    chunkIdx: number,
-    baseChunkText?: string,
-    anchorRect?: { x: number; top: number; bottom: number }
-  ) => void;
   onStartQuizPhase: () => void;
   onCompleteTachistoscope: (
     correctRounds: number,
@@ -297,15 +288,12 @@ export function ReadingScreen({
   activeWpm,
   activeChunkIndex,
   ghostChunkIndex,
-  setActiveChunkIndex,
   onAdvanceChunk,
   isPlaying,
   fadeOutPassed,
   sessionResetKey,
   onAbort,
   onTogglePlayPause,
-  onIncrementRegression,
-  onTranslateChunkOrWord,
   onStartQuizPhase,
   onCompleteTachistoscope,
 }: ReadingScreenProps) {
@@ -497,12 +485,8 @@ export function ReadingScreen({
 
           {selectedMode === 'rsvp' ? (
             <div
-              onClick={() => {
-                if (isPlaying) {
-                  onAdvanceChunk();
-                }
-              }}
-              title={isPlaying ? 'Click or press SPACE to advance chunk' : ''}
+              onClick={onAdvanceChunk}
+              title="Click or press SPACE to advance chunk"
               className="py-10 flex flex-col items-center justify-center space-y-5 cursor-pointer"
             >
               <div className="w-64 sm:w-80 py-6 bg-[#0D0618]/80 border-y border-[#FF1E7A]/40 relative flex items-center justify-center">
@@ -518,37 +502,10 @@ export function ReadingScreen({
                 )}
                 <div className="w-0.5 h-2.5 bg-[#FF1E7A] absolute left-1/2 bottom-0 -translate-x-1/2" />
               </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    onTranslateChunkOrWord(
-                      selectedPassage.chunks[activeChunkIndex] || '',
-                      activeChunkIndex,
-                      selectedPassage.chunks[activeChunkIndex] || '',
-                      {
-                        x: rect.left + rect.width / 2,
-                        top: rect.top,
-                        bottom: rect.bottom,
-                      }
-                    );
-                  }}
-                  className="cyber-btn px-3 py-1.5 bg-[#0D0618] border border-[#00F5D4]/50 text-[#00F5D4] font-terminal text-xs flex items-center gap-1.5 hover:bg-[#00F5D4]/15"
-                >
-                  <Languages className="w-3.5 h-3.5" />
-                  <span>TRANSLATE CHUNK</span>
-                </button>
-              </div>
             </div>
           ) : selectedMode === 'saccade_rail' ? (
             <div
-              onClick={() => {
-                if (isPlaying) {
-                  onAdvanceChunk();
-                }
-              }}
+              onClick={onAdvanceChunk}
               className="space-y-3 cursor-pointer"
             >
               {/* 3-Position Spiral Staircase Rail Header */}
@@ -616,28 +573,7 @@ export function ReadingScreen({
                       }`}
                     >
                       <span
-                        data-chunk-interactive="true"
-                        onClick={(e) => {
-                          if (!isPlaying) {
-                            e.stopPropagation();
-                            const rect =
-                              e.currentTarget.getBoundingClientRect();
-                            if (idx < activeChunkIndex) {
-                              onIncrementRegression();
-                            }
-                            setActiveChunkIndex(idx);
-                            onTranslateChunkOrWord(chunk, idx, chunk, {
-                              x: rect.left + rect.width / 2,
-                              top: rect.top,
-                              bottom: rect.bottom,
-                            });
-                          }
-                        }}
-                        title={
-                          isPlaying
-                            ? 'Click anywhere or press SPACE to advance chunk'
-                            : 'Tap to translate chunk'
-                        }
+                        title="Click anywhere or press SPACE to advance chunk"
                         className={`relative inline-block whitespace-nowrap px-2.5 py-0.5 border-b-2 text-base sm:text-xl font-medium cursor-pointer transition-colors duration-75 ${
                           isActive && isGhost
                             ? 'bg-[#00F5D4]/20 border-[#00F5D4] border-t-2 border-t-[#FFE600] text-[#F2F5F8]'
@@ -667,11 +603,7 @@ export function ReadingScreen({
             </div>
           ) : (
             <div
-              onClick={() => {
-                if (isPlaying) {
-                  onAdvanceChunk();
-                }
-              }}
+              onClick={onAdvanceChunk}
               className="space-y-4 cursor-pointer"
             >
               {selectedMode === 'syntax_skimmer' && (
@@ -722,28 +654,7 @@ export function ReadingScreen({
                         </span>
                       )}
                       <span
-                        data-chunk-interactive="true"
-                        onClick={(e) => {
-                          if (!isPlaying) {
-                            e.stopPropagation();
-                            const rect =
-                              e.currentTarget.getBoundingClientRect();
-                            if (idx < activeChunkIndex) {
-                              onIncrementRegression();
-                            }
-                            setActiveChunkIndex(idx);
-                            onTranslateChunkOrWord(chunk, idx, chunk, {
-                              x: rect.left + rect.width / 2,
-                              top: rect.top,
-                              bottom: rect.bottom,
-                            });
-                          }
-                        }}
-                        title={
-                          isPlaying
-                            ? 'Click or press SPACE to advance chunk (Pause to translate)'
-                            : 'Tap to translate chunk'
-                        }
+                        title="Click or press SPACE to advance chunk"
                         style={{
                           opacity:
                             isPassed && !isGhost && fadeOutPassed ? 0.15 : 1,
@@ -773,7 +684,7 @@ export function ReadingScreen({
             </div>
           )}
 
-          {/* Prominent Chunk Advance Action Bar (like Calibration) */}
+          {/* Prominent Chunk Advance Action Bar */}
           <div className="mt-5 pt-4 border-t border-[#00F5D4]/20 flex flex-wrap items-center gap-2">
             <button
               type="button"
@@ -792,29 +703,6 @@ export function ReadingScreen({
               </span>
               <ChevronRight className="w-4 h-4" />
             </button>
-
-            <button
-              type="button"
-              onClick={(e) => {
-                const rect = e.currentTarget.getBoundingClientRect();
-                const currentChunk =
-                  selectedPassage.chunks[activeChunkIndex] || '';
-                onTranslateChunkOrWord(
-                  currentChunk,
-                  activeChunkIndex,
-                  currentChunk,
-                  {
-                    x: rect.left + rect.width / 2,
-                    top: rect.top,
-                    bottom: rect.bottom,
-                  }
-                );
-              }}
-              className="cyber-btn py-3 px-3.5 bg-[#0D0618] border border-[#00F5D4]/50 text-[#00F5D4] font-terminal text-xs flex items-center gap-1.5 hover:bg-[#00F5D4]/15"
-            >
-              <Languages className="w-3.5 h-3.5" />
-              <span>TRANSLATE</span>
-            </button>
           </div>
         </ChamferedPanel>
       )}
@@ -823,8 +711,8 @@ export function ReadingScreen({
       {selectedMode !== 'tachistoscope' && (
         <div className="flex items-center justify-between font-terminal text-xs text-[#6C7A89]">
           <span>
-            [CLICK / SPACE / →] ADVANCE CHUNK &nbsp;·&nbsp; [P] PAUSE (TAP WORD
-            TO TRANSLATE) &nbsp;·&nbsp; [←] STEP BACK
+            [CLICK / SPACE / →] ADVANCE CHUNK &nbsp;·&nbsp; [P] PAUSE
+            &nbsp;·&nbsp; [←] STEP BACK
           </span>
           <button
             type="button"

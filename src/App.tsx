@@ -75,10 +75,7 @@ import {
   computeChunkDurationMs,
   buildSmoothedGhostWeights,
 } from './lib/pacing';
-import {
-  LexiconPopupState,
-  extractWordAtClientPoint,
-} from './lib/wordLookup';
+import { LexiconPopupState } from './lib/wordLookup';
 
 export function App() {
   // Navigation & Hierarchy State
@@ -529,36 +526,22 @@ export function App() {
     ]
   );
 
-  // Universal Tap-to-Translate handler for any non-button text in Quiz, UI, Result, or Modals
+  // Dismiss the Preview lexicon popover when clicking outside the popover or interactive chunks
   const handleGlobalContainerClick = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
+      if (!lexiconPopup) return;
       const target = e.target as HTMLElement | null;
       if (!target) return;
-
-      if (target.closest('[data-lexicon-popup="true"]')) return;
-
       if (
         target.closest(
-          'button:not(:disabled), a, input, select, textarea, label, [data-chunk-interactive="true"]'
+          '[data-lexicon-popup="true"], [data-chunk-interactive="true"]'
         )
       ) {
         return;
       }
-
-      const hit = extractWordAtClientPoint(e.clientX, e.clientY);
-      if (hit) {
-        void handleTranslateChunkOrWord(
-          hit.word,
-          -1,
-          hit.phrase,
-          hit.rect,
-          hit.contextSentence
-        );
-      } else if (lexiconPopup) {
-        setLexiconPopup(null);
-      }
+      setLexiconPopup(null);
     },
-    [handleTranslateChunkOrWord, lexiconPopup]
+    [lexiconPopup]
   );
 
   // Transition from Reading to Quiz
@@ -1239,7 +1222,6 @@ export function App() {
           activeWpm={activeWpm}
           activeChunkIndex={activeChunkIndex}
           ghostChunkIndex={ghostChunkIndex}
-          setActiveChunkIndex={setActiveChunkIndex}
           onAdvanceChunk={handleAdvanceReadingChunk}
           isPlaying={isPlaying}
           fadeOutPassed={fadeOutPassed}
@@ -1263,11 +1245,6 @@ export function App() {
               return !p;
             });
           }}
-          onIncrementRegression={() => {
-            setRegressionCount((r) => r + 1);
-            setTotalSteps((s) => s + 1);
-          }}
-          onTranslateChunkOrWord={handleTranslateChunkOrWord}
           onStartQuizPhase={startQuizPhase}
           onCompleteTachistoscope={(correctRounds, totalRounds, flashMs) => {
             finalizeSession(correctRounds, totalRounds, flashMs);
@@ -1285,7 +1262,6 @@ export function App() {
           selectedOption={selectedOption}
           onSelectQuizOption={handleSelectQuizOption}
           onNextQuizStep={handleNextQuizStep}
-          onTranslateChunkOrWord={handleTranslateChunkOrWord}
         />
       )}
 
@@ -1383,7 +1359,7 @@ export function App() {
         />
       )}
 
-      {lexiconPopup && (
+      {screen === 'preview' && lexiconPopup && (
         <LexiconPopover
           popup={lexiconPopup}
           screen={screen}
@@ -1392,7 +1368,6 @@ export function App() {
           onClose={() => setLexiconPopup(null)}
           onResumeReading={() => {
             setLexiconPopup(null);
-            setIsPlaying(true);
           }}
           onOpenSettings={() => {
             setLexiconPopup(null);
