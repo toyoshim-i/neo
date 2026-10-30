@@ -470,26 +470,28 @@ export function ReadingScreen({
             {!hasStartedPacing ? (
               <span className="px-2 py-0.5 border border-[#FFE600] bg-[#FFE600]/20 text-[#FFE600] font-bold flex items-center gap-1 animate-pulse">
                 <MousePointerClick className="w-3 h-3" />
-                <span>TAP / SPACE TO START TIMER &amp; ADVANCE</span>
+                <span>TAP / SPACE TO START</span>
+              </span>
+            ) : hasGhost ? (
+              <span
+                className={`px-2 py-0.5 border font-bold ${
+                  chunkDelta > 0
+                    ? 'border-[#00F5D4]/60 bg-[#00F5D4]/15 text-[#00F5D4]'
+                    : chunkDelta === 0
+                    ? 'border-[#FFE600]/60 bg-[#FFE600]/15 text-[#FFE600]'
+                    : 'border-[#FF1E7A]/60 bg-[#FF1E7A]/15 text-[#FF1E7A]'
+                }`}
+              >
+                {chunkDelta > 0
+                  ? `▲ +${chunkDelta} AHEAD OF GHOST`
+                  : chunkDelta === 0
+                  ? '● NECK & NECK WITH GHOST'
+                  : `▼ ${chunkDelta} BEHIND GHOST`}
               </span>
             ) : (
-              hasGhost && (
-                <span
-                  className={`px-2 py-0.5 border font-bold ${
-                    chunkDelta > 0
-                      ? 'border-[#00F5D4]/60 bg-[#00F5D4]/15 text-[#00F5D4]'
-                      : chunkDelta === 0
-                      ? 'border-[#FFE600]/60 bg-[#FFE600]/15 text-[#FFE600]'
-                      : 'border-[#FF1E7A]/60 bg-[#FF1E7A]/15 text-[#FF1E7A]'
-                  }`}
-                >
-                  {chunkDelta > 0
-                    ? `▲ +${chunkDelta} AHEAD OF GHOST`
-                    : chunkDelta === 0
-                    ? '● NECK & NECK WITH GHOST'
-                    : `▼ ${chunkDelta} BEHIND GHOST`}
-                </span>
-              )
+              <span className="px-2 py-0.5 border border-[#00F5D4]/50 bg-[#00F5D4]/10 text-[#00F5D4] font-bold">
+                ● RECORDING GHOST PACE
+              </span>
             )}
           </div>
 
@@ -504,18 +506,18 @@ export function ReadingScreen({
               className="py-10 flex flex-col items-center justify-center space-y-5 cursor-pointer"
             >
               <div className="w-64 sm:w-80 py-6 bg-[#0D0618]/80 border-y border-[#FF1E7A]/40 relative flex items-center justify-center">
+                {!hasStartedPacing && (
+                  <span className="pointer-events-none absolute -top-3 left-1/2 -translate-x-1/2 z-20 inline-flex items-center gap-1 px-2 py-0.5 bg-[#FFE600] text-[#0D0618] font-terminal text-[10px] leading-none font-extrabold whitespace-nowrap animate-pulse shadow-[0_0_12px_rgba(255,230,0,0.5)]">
+                    <MousePointerClick className="w-3 h-3" />
+                    <span>TAP / SPACE TO START</span>
+                  </span>
+                )}
                 <div className="w-0.5 h-2.5 bg-[#FF1E7A] absolute left-1/2 top-0 -translate-x-1/2" />
                 {renderRsvpChunk(
                   selectedPassage.chunks[activeChunkIndex] || ''
                 )}
                 <div className="w-0.5 h-2.5 bg-[#FF1E7A] absolute left-1/2 bottom-0 -translate-x-1/2" />
               </div>
-              {!hasStartedPacing && (
-                <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-[#FFE600] text-[#0D0618] font-terminal text-xs font-extrabold animate-pulse shadow-[0_0_14px_rgba(255,230,0,0.45)]">
-                  <MousePointerClick className="w-3.5 h-3.5" />
-                  <span>TAP ANYWHERE OR PRESS [SPACE] FOR NEXT CHUNK</span>
-                </div>
-              )}
               <div className="flex items-center gap-2">
                 <button
                   type="button"
@@ -636,7 +638,7 @@ export function ReadingScreen({
                             ? 'Click anywhere or press SPACE to advance chunk'
                             : 'Tap to translate chunk'
                         }
-                        className={`inline-block whitespace-nowrap px-2.5 py-0.5 border-b-2 text-base sm:text-xl font-medium cursor-pointer transition-colors duration-75 ${
+                        className={`relative inline-block whitespace-nowrap px-2.5 py-0.5 border-b-2 text-base sm:text-xl font-medium cursor-pointer transition-colors duration-75 ${
                           isActive && isGhost
                             ? 'bg-[#00F5D4]/20 border-[#00F5D4] border-t-2 border-t-[#FFE600] text-[#F2F5F8] font-bold'
                             : isActive
@@ -651,13 +653,13 @@ export function ReadingScreen({
                         }`}
                       >
                         {chunk}
+                        {idx === 0 && !hasStartedPacing && (
+                          <span className="pointer-events-none absolute left-full ml-2 top-1/2 -translate-y-1/2 z-20 inline-flex items-center gap-1 px-2 py-0.5 bg-[#FFE600] text-[#0D0618] font-terminal text-[10px] leading-none font-extrabold whitespace-nowrap animate-pulse shadow-[0_0_12px_rgba(255,230,0,0.5)]">
+                            <MousePointerClick className="w-3 h-3" />
+                            <span>TAP / SPACE</span>
+                          </span>
+                        )}
                       </span>
-                      {idx === 0 && !hasStartedPacing && (
-                        <span className="inline-flex items-center gap-1 ml-2 px-2 py-0.5 bg-[#FFE600] text-[#0D0618] font-terminal text-[10px] font-extrabold animate-pulse self-center shadow-[0_0_12px_rgba(255,230,0,0.5)]">
-                          <MousePointerClick className="w-3 h-3" />
-                          <span>TAP / SPACE</span>
-                        </span>
-                      )}
                     </div>
                   );
                 })}
@@ -712,7 +714,13 @@ export function ReadingScreen({
                     selectedPassage.discourseMarkerIndices.includes(idx);
 
                   return (
-                    <span key={idx}>
+                    <span key={idx} className="relative inline">
+                      {idx === 0 && !hasStartedPacing && (
+                        <span className="pointer-events-none absolute -top-5 left-0 z-20 inline-flex items-center gap-1 px-1.5 py-0.5 bg-[#FFE600] text-[#0D0618] font-terminal text-[9px] leading-none font-extrabold whitespace-nowrap animate-pulse shadow-[0_0_12px_rgba(255,230,0,0.5)]">
+                          <MousePointerClick className="w-2.5 h-2.5" />
+                          <span>TAP / SPACE</span>
+                        </span>
+                      )}
                       <span
                         data-chunk-interactive="true"
                         onClick={(e) => {
@@ -757,13 +765,7 @@ export function ReadingScreen({
                           : selectedMode === 'lexical_anchor'
                           ? renderLexicalAnchorChunk(chunk, isActive)
                           : chunk}
-                      </span>
-                      {idx === 0 && !hasStartedPacing && (
-                        <span className="inline-flex items-center gap-1 ml-1.5 mr-1 px-2 py-0.5 bg-[#FFE600] text-[#0D0618] font-terminal text-[10px] font-extrabold animate-pulse align-middle shadow-[0_0_12px_rgba(255,230,0,0.5)]">
-                          <MousePointerClick className="w-3 h-3" />
-                          <span>TAP / SPACE</span>
-                        </span>
-                      )}{' '}
+                      </span>{' '}
                     </span>
                   );
                 })}
