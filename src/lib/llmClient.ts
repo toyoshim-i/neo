@@ -192,6 +192,11 @@ export function saveWebLlmModelSelection(modelId: WebLlmModelId): void {
 
 export const DEFAULT_WEBLLM_MODEL: WebLlmModelId = getSavedWebLlmModel();
 
+export function isTranslationOnlyWebLlmModel(modelId?: string): boolean {
+  const id = (modelId || DEFAULT_WEBLLM_MODEL).toLowerCase();
+  return id.startsWith('plamo-3-translate');
+}
+
 export type TranslationLangCode =
   | 'ja'
   | 'zh-CN'
@@ -1224,56 +1229,42 @@ export async function processPassageWithOptionalLlm(params: {
         params.onProgress?.(`[WebGPU ${pct}%] ${text}`);
       });
 
-      // PLaMo 3 Translate (`plamo3`) is a dedicated translation engine; verify translation pipeline
-      // and keep deterministic rule-based English Cloze distractors.
+      // PLaMo 3 Translate (`plamo3`) is a dedicated translation engine;
+      // English Cloze distractor synthesis is only supported on general instruct models (Bonsai 1/2).
       if (engine.arch.archName === 'plamo3') {
+        fallbackReason =
+          'PLaMo 3 Translate is a dedicated translation model (Cloze quiz uses Rule-based distractors)';
+      } else {
         params.onProgress?.(
-          `Verifying PLaMo 3 Translate on WebGPU (${modelId})...`
+          `Generating Cloze distractors on WebGPU (${modelId})...`
         );
-        const targetLang = getSavedTranslationLang();
-        await runSerializedInference(() =>
-          translateTerm(engine, {
-            term: targetWords[0] || 'rapid',
-            context: params.rawText.slice(0, 160),
-            sourceLang: 'en',
-            targetLang,
+
+        const reply = await runSerializedInference(() =>
+          engine.generate(distractorMessages, {
+            temperature: 0,
+            maxNewTokens: 64,
           })
         );
+
+        const content = reply.text || '';
+        const { updatedQuestions, appliedCount } = applyLlmDistractorsToQuestions(
+          basePassage.questions,
+          content
+        );
+
+        if (appliedCount === 0) {
+          const preview = content.replace(/\s+/g, ' ').trim().slice(0, 120);
+          throw new Error(`No valid distractor words parsed | Raw: "${preview}"`);
+        }
+
         return {
-          passage: basePassage,
+          passage: {
+            ...basePassage,
+            questions: updatedQuestions,
+          },
           usedProvider: 'webllm',
         };
       }
-
-      params.onProgress?.(
-        `Generating Cloze distractors on WebGPU (${modelId})...`
-      );
-
-      const reply = await runSerializedInference(() =>
-        engine.generate(distractorMessages, {
-          temperature: 0,
-          maxNewTokens: 64,
-        })
-      );
-
-      const content = reply.text || '';
-      const { updatedQuestions, appliedCount } = applyLlmDistractorsToQuestions(
-        basePassage.questions,
-        content
-      );
-
-      if (appliedCount === 0) {
-        const preview = content.replace(/\s+/g, ' ').trim().slice(0, 120);
-        throw new Error(`No valid distractor words parsed | Raw: "${preview}"`);
-      }
-
-      return {
-        passage: {
-          ...basePassage,
-          questions: updatedQuestions,
-        },
-        usedProvider: 'webllm',
-      };
     } catch (err) {
       fallbackReason = err instanceof Error ? err.message : String(err);
       params.onProgress?.(

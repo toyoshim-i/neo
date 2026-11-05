@@ -64,6 +64,7 @@ import {
   consumeInterruptedLoadGuard,
   getVerifiedWebLlmModel,
   initWebLlmEngine,
+  isTranslationOnlyWebLlmModel,
 } from './lib/llmClient';
 import { buildNormalizedPassage } from './lib/chunker';
 import {
@@ -972,7 +973,18 @@ export function App() {
   // Non-blocking background LLM quiz synthesis (runs while user reads rule-chunked passage)
   const upgradePassageQuizInBackground = useCallback(
     (basePassage: TrainingPassage) => {
-      if (llmProvider === 'rule_based') return;
+      if (
+        llmProvider === 'rule_based' ||
+        (llmProvider === 'webllm' &&
+          isTranslationOnlyWebLlmModel(selectedWebLlmModel))
+      ) {
+        setBgQuizStatus({
+          passageId: basePassage.id,
+          state: 'fallback',
+          detail: 'RULE QUIZ ACTIVE',
+        });
+        return;
+      }
       setBgQuizStatus({
         passageId: basePassage.id,
         state: 'running',

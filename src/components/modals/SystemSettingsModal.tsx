@@ -25,6 +25,7 @@ import {
   saveTranslationLangSelection,
   saveWebLlmModelSelection,
   TRANSLATION_LANGUAGES,
+  translateSelection,
   translateWithChromeBuiltInTranslator,
   TranslationLangCode,
   unloadWebLlmEngine,
@@ -104,6 +105,11 @@ export function SystemSettingsModal({
     sampleOptions?: string[];
     sampleAnswer: string;
     fallbackReason?: string;
+    translationProbe?: {
+      term: string;
+      output: string;
+      source: string;
+    };
   } | null>(null);
   const [chromeAiStatus, setChromeAiStatus] = useState<string>(
     'CHECKING CHROME BUILT-IN AI...'
@@ -668,6 +674,44 @@ export function SystemSettingsModal({
                             llmModel: profile.llmModel,
                             onProgress: (msg) => setLlmDiagStatus(msg),
                           });
+
+                        let translationProbe:
+                          | { term: string; output: string; source: string }
+                          | undefined;
+                        if (llmProvider !== 'rule_based') {
+                          setLlmDiagStatus('Running translation probe...');
+                          try {
+                            const probeTerm = 'extract vital cues';
+                            const transRes = await translateSelection({
+                              text: probeTerm,
+                              contextSentence: sampleText,
+                              targetLang: translationLang,
+                              provider: llmProvider,
+                              webLlmModel: selectedWebLlmModel,
+                              llmEndpoint: profile.llmEndpoint,
+                              llmModel: profile.llmModel,
+                              allowCloudApi: allowCloudTranslation,
+                            });
+                            translationProbe = {
+                              term: probeTerm,
+                              output: transRes.translation,
+                              source:
+                                transRes.source === 'webllm'
+                                  ? 'HACHIUE'
+                                  : transRes.source.toUpperCase(),
+                            };
+                          } catch (transErr) {
+                            translationProbe = {
+                              term: 'extract vital cues',
+                              output:
+                                transErr instanceof Error
+                                  ? `ERROR: ${transErr.message}`
+                                  : 'ERROR',
+                              source: 'FAILED',
+                            };
+                          }
+                        }
+
                         const elapsedMs = Math.round(performance.now() - t0);
                         if (isWebLlmReady(selectedWebLlmModel)) {
                           setWebLlmStatus('READY IN VRAM');
@@ -681,6 +725,7 @@ export function SystemSettingsModal({
                           sampleOptions: q0?.options,
                           sampleAnswer: q0?.options[q0.correctIndex] || 'N/A',
                           fallbackReason,
+                          translationProbe,
                         });
                         setLlmDiagStatus('');
                         soundEngine.playQuizCorrect(false);
@@ -718,7 +763,7 @@ export function SystemSettingsModal({
                     <div className="space-y-2 pt-1 border-t border-[#6C7A89]/30 text-[10px]">
                       <div className="flex items-center justify-between">
                         <span className="text-[#00F5D4] font-bold">
-                          BACKEND:{' '}
+                          QUIZ BACKEND:{' '}
                           {llmDiagResult.usedProvider === 'webllm'
                             ? 'HACHIUE'
                             : llmDiagResult.usedProvider.toUpperCase()}
@@ -728,9 +773,23 @@ export function SystemSettingsModal({
                         </span>
                       </div>
 
+                      {llmDiagResult.translationProbe && (
+                        <div className="p-2 bg-[#180B29] border border-[#00F5D4]/50 space-y-1">
+                          <div className="text-[#00F5D4] font-bold">
+                            TRANSLATION PROBE ({llmDiagResult.translationProbe.source}):
+                          </div>
+                          <div className="text-[#F2F5F8]">
+                            &quot;{llmDiagResult.translationProbe.term}&quot; →{' '}
+                            <span className="text-[#FFE600] font-bold">
+                              {llmDiagResult.translationProbe.output}
+                            </span>
+                          </div>
+                        </div>
+                      )}
+
                       {llmDiagResult.fallbackReason && (
-                        <div className="p-1.5 bg-[#FF1E7A]/15 border border-[#FF1E7A] text-[#FF1E7A] break-words">
-                          FALLBACK REASON: {llmDiagResult.fallbackReason}
+                        <div className="p-1.5 bg-[#FFE600]/10 border border-[#FFE600]/50 text-[#FFE600] break-words">
+                          QUIZ NOTE: {llmDiagResult.fallbackReason}
                         </div>
                       )}
 
@@ -752,7 +811,11 @@ export function SystemSettingsModal({
 
                       <div>
                         <div className="text-[#6C7A89]">
-                          SAMPLE CLOZE QUIZ Q1 (LLM DISTRACTORS):
+                          SAMPLE CLOZE QUIZ Q1 (
+                          {llmDiagResult.usedProvider === 'rule_based'
+                            ? 'RULE-BASED DISTRACTORS'
+                            : 'LLM DISTRACTORS'}
+                          ):
                         </div>
                         <div className="text-[#F2F5F8] mt-0.5">
                           {llmDiagResult.sampleQuestion}
