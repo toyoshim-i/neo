@@ -1,8 +1,11 @@
 import {
   HachiueEngine,
   clearModelCache,
+  extractCleanTermTranslation,
   isModelCached,
+  isValidTargetLanguageTranslation,
   prefetchModel,
+  translateTerm,
   type ParsedGgufHeader,
 } from 'hachiue';
 import { TrainingPassage, QuizQuestion } from '../types/schema';
@@ -118,6 +121,7 @@ export function saveLlmProviderSelection(provider: LlmProviderType): void {
 }
 
 export type WebLlmModelId =
+  | 'plamo-3-translate-0.8b-q4'
   | 'bonsai-1.7b-q1'
   | 'bonsai-2-2b-pq2'
   | 'bonsai-2-4b-pq2';
@@ -132,25 +136,32 @@ export interface WebGpuModelOption {
 
 export const WEBLLM_MODEL_OPTIONS: WebGpuModelOption[] = [
   {
+    id: 'plamo-3-translate-0.8b-q4',
+    url: 'https://huggingface.co/pfnet/plamo-3-translate-0.8b-GGUF/resolve/main/plamo-3-translate-0.8b-Q4_0.gguf',
+    label: 'DEFAULT // PLAMO 3 0.8B',
+    vram: '522 MB',
+    desc: 'High-accuracy dedicated translator (Recommended)',
+  },
+  {
     id: 'bonsai-1.7b-q1',
     url: 'https://huggingface.co/prism-ml/Bonsai-1.7B-gguf/resolve/main/Bonsai-1.7B-Q1_0.gguf',
     label: 'LITE // BONSAI 1.7B',
     vram: '237 MB',
-    desc: 'Lightweight & fast',
+    desc: 'Ultra-lightweight 1-bit LLM',
   },
   {
     id: 'bonsai-2-2b-pq2',
     url: 'https://huggingface.co/prism-ml/Ternary-Bonsai-2-2B-gguf/resolve/main/Ternary-Bonsai-2-2B-PQ2_0.gguf',
     label: 'STANDARD // BONSAI 2 2B',
     vram: '495 MB',
-    desc: 'Balanced quality (Recommended)',
+    desc: 'Balanced translation & quiz LLM',
   },
   {
     id: 'bonsai-2-4b-pq2',
     url: 'https://huggingface.co/prism-ml/Ternary-Bonsai-2-4B-gguf/resolve/main/Ternary-Bonsai-2-4B-PQ2_0.gguf',
-    label: 'HIGH QUALITY // BONSAI 2 4B',
+    label: 'HEAVY // BONSAI 2 4B',
     vram: '1.09 GB',
-    desc: 'Best translation accuracy',
+    desc: 'High-capacity translation & quiz LLM',
   },
 ];
 
@@ -166,7 +177,7 @@ export function getSavedWebLlmModel(): WebLlmModelId {
       return saved as WebLlmModelId;
     }
   }
-  return 'bonsai-2-2b-pq2';
+  return 'plamo-3-translate-0.8b-q4';
 }
 
 export function saveWebLlmModelSelection(modelId: WebLlmModelId): void {
@@ -1199,7 +1210,7 @@ export async function processPassageWithOptionalLlm(params: {
   const distractorPrompt = buildDistractorPrompt(targetWords);
   const distractorMessages = buildDistractorChatMessages(targetWords);
 
-  // Tier A: In-Browser WebGPU (`hachiue` Bonsai 1 & 2) — Ultra-lightweight distractor word generation
+  // Tier A: In-Browser WebGPU (`hachiue` PLaMo 3 Translate / Bonsai 1 & 2)
   if (params.provider === 'webllm') {
     try {
       const requestedModel = params.webLlmModel || DEFAULT_WEBLLM_MODEL;
@@ -1212,6 +1223,27 @@ export async function processPassageWithOptionalLlm(params: {
         const pct = Math.round(progress * 100);
         params.onProgress?.(`[WebGPU ${pct}%] ${text}`);
       });
+
+      // PLaMo 3 Translate (`plamo3`) is a dedicated translation engine; verify translation pipeline
+      // and keep deterministic rule-based English Cloze distractors.
+      if (engine.arch.archName === 'plamo3') {
+        params.onProgress?.(
+          `Verifying PLaMo 3 Translate on WebGPU (${modelId})...`
+        );
+        const targetLang = getSavedTranslationLang();
+        await runSerializedInference(() =>
+          translateTerm(engine, {
+            term: targetWords[0] || 'rapid',
+            context: params.rawText.slice(0, 160),
+            sourceLang: 'en',
+            targetLang,
+          })
+        );
+        return {
+          passage: basePassage,
+          usedProvider: 'webllm',
+        };
+      }
 
       params.onProgress?.(
         `Generating Cloze distractors on WebGPU (${modelId})...`
@@ -1595,118 +1627,9 @@ async function translateViaCloudServer(
   return translated;
 }
 
-function extractCleanTranslationLine(raw: string): string {
-  const withoutTags = raw
-    .replace(/<think>[\s\S]*?<\/think>/gi, '')
-    .replace(/<think>[\s\S]*$/gi, '')
-    .replace(
-      /<\|thought\|>[\s\S]*?(?:<\|thought\|>|<\/thought>|<thought\|>|$)/gi,
-      ''
-    )
-    .trim();
-  const firstNonEmptyLine =
-    withoutTags
-      .split('\n')
-      .map((line) => line.trim())
-      .find((line) => line.length > 0) || '';
-  const afterArrow = firstNonEmptyLine.includes('→') || firstNonEmptyLine.includes('->')
-    ? (firstNonEmptyLine.split(/→|->/).pop() || '').trim()
-    : firstNonEmptyLine;
-  return afterArrow
-    .replace(/^(?:日本語訳|日本語|意味|訳|Translation|Meaning)\s*[:：]\s*/i, '')
-    .replace(/^["'「『`]+|["'」』`]+$/g, '')
-    .trim();
-}
-
-function isValidTargetLanguageTranslation(
-  output: string,
-  sourceText: string,
-  targetLang: TranslationLangCode
-): boolean {
-  if (!output) return false;
-  const cleanOut = output.trim();
-  const cleanSrc = sourceText.trim();
-  if (cleanOut.toLowerCase() === cleanSrc.toLowerCase()) {
-    return false;
-  }
-  if (targetLang === 'ja') {
-    // Must contain at least one Hiragana, Katakana, or CJK Kanji character
-    return /[\u3040-\u30FF\u3400-\u4DBF\u4E00-\u9FFF]/.test(cleanOut);
-  }
-  if (targetLang === 'zh-CN' || targetLang === 'zh-TW') {
-    return /[\u3400-\u4DBF\u4E00-\u9FFF]/.test(cleanOut);
-  }
-  if (targetLang === 'ko') {
-    return /[\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F]/.test(cleanOut);
-  }
-  return cleanOut.length > 0;
-}
-
-function buildTranslationChatMessages(
-  cleanText: string,
-  targetLang: TranslationLangCode
-): Array<{ role: 'system' | 'user'; content: string }> {
-  const localizedTemplates: Record<
-    TranslationLangCode,
-    {
-      system: string;
-      user: string;
-    }
-  > = {
-    ja: {
-      system:
-        'あなたは英和辞典です。与えられた英語の簡潔な日本語訳のみを出力してください。英単語や類義語は出力しないでください。',
-      user: `例:\n"rapid" → 急速な、速い\n"extract vital cues" → 重要な手がかりを抽出する\n"${cleanText}" →`,
-    },
-    'zh-CN': {
-      system:
-        '你是一本英汉词典。请只输出所给英文的简短中文翻译，不要输出英文或解释。',
-      user: `示例:\n"rapid" → 快速的、迅速的\n"extract vital cues" → 提取重要线索\n"${cleanText}" →`,
-    },
-    'zh-TW': {
-      system:
-        '你是一本英漢詞典。請只輸出所給英文的簡短繁體中文翻譯，不要輸出英文或解釋。',
-      user: `示例:\n"rapid" → 快速的、迅速的\n"extract vital cues" → 提取重要線索\n"${cleanText}" →`,
-    },
-    ko: {
-      system:
-        '당신은 영한사전입니다. 주어진 영어의 간결한 한국어 뜻만 출력하세요.',
-      user: `예시:\n"rapid" → 빠른, 신속한\n"extract vital cues" → 중요한 단서를 추출하다\n"${cleanText}" →`,
-    },
-    es: {
-      system:
-        'Eres un diccionario inglés-español. Escribe SOLO la traducción breve al español.',
-      user: `Ejemplo:\n"rapid" → rápido, veloz\n"extract vital cues" → extraer pistas vitales\n"${cleanText}" →`,
-    },
-    fr: {
-      system:
-        'Vous êtes un dictionnaire anglais-français. Donnez UNIQUEMENT la traduction courte en français.',
-      user: `Exemple:\n"rapid" → rapide, véloce\n"extract vital cues" → extraire des indices vitaux\n"${cleanText}" →`,
-    },
-    de: {
-      system:
-        'Du bist ein Englisch-Deutsch-Wörterbuch. Gib NUR die kurze deutsche Übersetzung aus.',
-      user: `Beispiel:\n"rapid" → schnell, rasch\n"extract vital cues" → wichtige Hinweise extrahieren\n"${cleanText}" →`,
-    },
-  };
-
-  const tpl = localizedTemplates[targetLang];
-
-  return [
-    {
-      role: 'system',
-      content: tpl.system,
-    },
-    {
-      role: 'user',
-      content: tpl.user,
-    },
-  ];
-}
-
 /**
  * Translates a selected word or phrase into the user's configured target language.
- * - Uses Chrome Built-in AI (`Translator` API or Gemini Nano `LanguageModel`), in-browser WebLLM, or Ollama.
+ * - Uses Chrome Built-in AI (`Translator` API or Gemini Nano `LanguageModel`), in-browser WebGPU (`hachiue` `translateTerm`), or Ollama.
  * - When local engines are unavailable and `allowCloudApi` is enabled in CONFIG, queries MyMemory API.
  */
 export async function translateSelection(params: {
@@ -1723,9 +1646,10 @@ export async function translateSelection(params: {
   source: 'webllm' | 'chrome_ai' | 'chrome_translator' | 'ollama' | 'cloud_dict';
 }> {
   const cleanText = params.text.trim();
+  const cleanCtx = params.contextSentence?.trim() || '';
   const activeModelScope =
     getLoadedWebLlmModelId() || params.webLlmModel || DEFAULT_WEBLLM_MODEL;
-  const cacheKey = `${params.provider}:${activeModelScope}:${params.targetLang}:${cleanText.toLowerCase()}`;
+  const cacheKey = `${params.provider}:${activeModelScope}:${params.targetLang}:${cleanText.toLowerCase()}:${cleanCtx.toLowerCase()}`;
   const cachedHit = translationResultCache.get(cacheKey);
   if (cachedHit) {
     return cachedHit;
@@ -1754,7 +1678,7 @@ export async function translateSelection(params: {
     }
     try {
       const raw = await promptChromeBuiltInAi(prompt, systemInstruction);
-      const out = extractCleanTranslationLine(raw);
+      const out = extractCleanTermTranslation(raw);
       if (out) {
         const hit = { translation: out, source: 'chrome_ai' as const };
         translationResultCache.set(cacheKey, hit);
@@ -1767,7 +1691,7 @@ export async function translateSelection(params: {
 
   let webLlmDiagError: string | null = null;
 
-  // 2. If WebGPU (`hachiue`) is selected (or already loaded in VRAM), run on-device translation
+  // 2. If WebGPU (`hachiue`) is selected (or already loaded in VRAM), run on-device translation via `translateTerm`
   if (
     (params.provider === 'webllm' && isWebLlmReady(params.webLlmModel)) ||
     isWebLlmReady()
@@ -1783,33 +1707,21 @@ export async function translateSelection(params: {
       const modelId =
         getLoadedWebLlmModelId() || params.webLlmModel || DEFAULT_WEBLLM_MODEL;
       const engine = await initWebLlmEngine(modelId);
-      const chatMessages = buildTranslationChatMessages(
-        cleanText,
-        params.targetLang
-      );
 
-      let streamedText = '';
-      const reply = await runSerializedInference(() =>
-        engine.generate(chatMessages, {
-          temperature: 0,
-          maxNewTokens: 28,
+      const res = await runSerializedInference(() =>
+        translateTerm(engine, {
+          term: cleanText,
+          context: cleanCtx || undefined,
+          sourceLang: 'en',
+          targetLang: params.targetLang,
           signal: abortCtrl.signal,
-          onToken: (_id, delta) => {
-            streamedText += delta;
-            // Stop immediately once the first non-empty line finishes
-            if (streamedText.trim().length > 0 && delta.includes('\n')) {
-              abortCtrl.abort();
-            }
-          },
         })
       );
       if (activeTranslationAbort === abortCtrl) {
         activeTranslationAbort = null;
       }
 
-      const rawContent = reply.text || streamedText || '';
-      const out = extractCleanTranslationLine(rawContent);
-
+      const out = res.translation;
       if (isValidTargetLanguageTranslation(out, cleanText, params.targetLang)) {
         const hit = { translation: out, source: 'webllm' as const };
         translationResultCache.set(cacheKey, hit);
@@ -1855,7 +1767,7 @@ export async function translateSelection(params: {
         const raw: string = isOpenAiCompat
           ? json.choices?.[0]?.message?.content || ''
           : json.response || '';
-        const out = extractCleanTranslationLine(raw);
+        const out = extractCleanTermTranslation(raw);
         if (out) {
           return { translation: out, source: 'ollama' };
         }

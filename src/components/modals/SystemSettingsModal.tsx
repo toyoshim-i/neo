@@ -285,7 +285,7 @@ export function SystemSettingsModal({
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
                 {(
                   [
-                    { id: 'webllm', label: 'HACHIUE (BONSAI 1/2)' },
+                    { id: 'webllm', label: 'HACHIUE (WEBGPU)' },
                     { id: 'chrome_ai', label: 'CHROME AI (NANO)' },
                     { id: 'ollama', label: 'OLLAMA API' },
                     { id: 'rule_based', label: 'RULE-BASED' },
@@ -384,15 +384,15 @@ export function SystemSettingsModal({
                 <div className="p-2.5 bg-[#0D0618] border border-[#FFE600]/40 space-y-2.5">
                   <div className="flex items-center justify-between text-[10px]">
                     <span className="text-[#6C7A89]">
-                      🪴 HACHIUE // WEBGPU BONSAI 1 &amp; 2 GGUF
+                      🪴 HACHIUE // WEBGPU PLAMO 3 &amp; BONSAI GGUF
                     </span>
                     <span className="text-[#00F5D4] font-bold">
                       {isWebGpuSupported() ? 'WEBGPU OK' : 'NO WEBGPU'}
                     </span>
                   </div>
 
-                  {/* WebGPU Model Selector (3-Tier Bonsai Lineup) */}
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
+                  {/* WebGPU Model Selector (PLaMo 3 Translate & Bonsai 1/2 Lineup) */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                     {WEBLLM_MODEL_OPTIONS.map((m) => {
                       const active = selectedWebLlmModel === m.id;
                       const isCached = cachedModels[m.id];
