@@ -50,7 +50,8 @@ import {
   WebLlmModelId,
   WEBLLM_MODEL_OPTIONS,
   DEFAULT_WEBLLM_MODEL,
-  isWebGpuSupported,
+  isHachiueSupported,
+  formatActiveHachiueReadyStatus,
   isWebLlmReady,
   isWebLlmLoading,
   subscribeWebLlmProgress,
@@ -120,12 +121,14 @@ export function App() {
     getSavedCloudTranslationEnabled()
   );
   const [llmProvider, setLlmProvider] = useState<LlmProviderType>(
-    () => getSavedLlmProvider() ?? (isWebGpuSupported() ? 'webllm' : 'rule_based')
+    () => getSavedLlmProvider() ?? (isHachiueSupported() ? 'webllm' : 'rule_based')
   );
   const [selectedWebLlmModel, setSelectedWebLlmModel] =
     useState<WebLlmModelId>(DEFAULT_WEBLLM_MODEL);
   const [webLlmStatus, setWebLlmStatus] = useState<string>(
-    isWebLlmReady(DEFAULT_WEBLLM_MODEL) ? 'READY IN VRAM' : 'NOT LOADED'
+    isWebLlmReady(DEFAULT_WEBLLM_MODEL)
+      ? formatActiveHachiueReadyStatus()
+      : 'NOT LOADED'
   );
   const [isPreloadingWebLlm, setIsPreloadingWebLlm] = useState<boolean>(
     isWebLlmLoading()
@@ -244,14 +247,14 @@ export function App() {
 
       setWebLlmStatus(
         isWebLlmReady(resolvedModel)
-          ? 'READY IN VRAM'
+          ? formatActiveHachiueReadyStatus()
           : cacheMap[resolvedModel]
           ? 'CACHED ON DISK (READY TO LOAD)'
           : 'NOT DOWNLOADED'
       );
 
       const activeProvider =
-        getSavedLlmProvider() ?? (isWebGpuSupported() ? 'webllm' : 'rule_based');
+        getSavedLlmProvider() ?? (isHachiueSupported() ? 'webllm' : 'rule_based');
       const verifiedModel = getVerifiedWebLlmModel();
 
       if (
@@ -265,7 +268,7 @@ export function App() {
           settleTimerId = setTimeout(() => {
             if (cancelled) return;
             const currentProvider =
-              getSavedLlmProvider() ?? (isWebGpuSupported() ? 'webllm' : 'rule_based');
+              getSavedLlmProvider() ?? (isHachiueSupported() ? 'webllm' : 'rule_based');
             if (
               currentProvider !== 'webllm' ||
               getVerifiedWebLlmModel() !== resolvedModel ||
@@ -275,13 +278,13 @@ export function App() {
               return;
             }
             setIsPreloadingWebLlm(true);
-            setWebLlmStatus('AUTO-LOADING VERIFIED MODEL INTO VRAM...');
+            setWebLlmStatus('AUTO-LOADING VERIFIED MODEL...');
             initWebLlmEngine(resolvedModel).then((ok) => {
               if (cancelled) return;
               setIsPreloadingWebLlm(false);
               if (ok) {
                 setWebLlmProgressPct(100);
-                setWebLlmStatus('READY IN VRAM // GPU LOADED');
+                setWebLlmStatus(formatActiveHachiueReadyStatus());
               }
             });
           }, 1500);
@@ -1002,7 +1005,7 @@ export function App() {
         llmModel: profile.llmModel,
       }).then(async ({ passage: upgraded, usedProvider }) => {
         if (isWebLlmReady(selectedWebLlmModel)) {
-          setWebLlmStatus('READY IN VRAM');
+          setWebLlmStatus(formatActiveHachiueReadyStatus());
         }
         if (usedProvider !== 'rule_based') {
           const merged: TrainingPassage = {

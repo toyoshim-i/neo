@@ -11,7 +11,11 @@ import {
 import {
   checkCachedWebLlmModels,
   checkChromePromptApiAvailability,
+  formatActiveHachiueReadyStatus,
+  getActiveHachiueBackendInfo,
   getLoadedWebLlmModelId,
+  getSavedHachiueBackend,
+  HachiueBackendPreference,
   initWebLlmEngine,
   isWebGpuSupported,
   isWebLlmReady,
@@ -21,6 +25,7 @@ import {
   promptChromeBuiltInAi,
   purgeWebLlmDiskCache,
   saveCloudTranslationEnabled,
+  saveHachiueBackendSelection,
   saveLlmProviderSelection,
   saveTranslationLangSelection,
   saveWebLlmModelSelection,
@@ -115,6 +120,9 @@ export function SystemSettingsModal({
     'CHECKING CHROME BUILT-IN AI...'
   );
   const [isTestingChromeAi, setIsTestingChromeAi] = useState<boolean>(false);
+  const [hachiueBackendPref, setHachiueBackendPref] =
+    useState<HachiueBackendPreference>(() => getSavedHachiueBackend());
+  const activeBackendInfo = getActiveHachiueBackendInfo();
 
   useEffect(() => {
     checkCachedWebLlmModels().then(setCachedModels);
@@ -291,7 +299,7 @@ export function SystemSettingsModal({
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
                 {(
                   [
-                    { id: 'webllm', label: 'HACHIUE (WEBGPU)' },
+                    { id: 'webllm', label: 'HACHIUE (GPU/SIMD)' },
                     { id: 'chrome_ai', label: 'CHROME AI (NANO)' },
                     { id: 'ollama', label: 'OLLAMA API' },
                     { id: 'rule_based', label: 'RULE-BASED' },
@@ -390,14 +398,67 @@ export function SystemSettingsModal({
                 <div className="p-2.5 bg-[#0D0618] border border-[#FFE600]/40 space-y-2.5">
                   <div className="flex items-center justify-between text-[10px]">
                     <span className="text-[#6C7A89]">
-                      🪴 HACHIUE // WEBGPU PLAMO 3 &amp; BONSAI GGUF
+                      🪴 HACHIUE v0.3 // WEBGPU &amp; WASM SIMD GGUF
                     </span>
                     <span className="text-[#00F5D4] font-bold">
-                      {isWebGpuSupported() ? 'WEBGPU OK' : 'NO WEBGPU'}
+                      {activeBackendInfo
+                        ? activeBackendInfo.backend === 'wasm'
+                          ? 'WASM SIMD ACTIVE'
+                          : 'WEBGPU ACTIVE'
+                        : isWebGpuSupported()
+                        ? 'WEBGPU + SIMD OK'
+                        : 'WASM SIMD FALLBACK'}
                     </span>
                   </div>
 
-                  {/* WebGPU Model Selector (PLaMo 3 Translate & Bonsai 1/2 Lineup) */}
+                  {/* Backend Mode Selector (Auto WebGPU -> Wasm SIMD fallback vs Force Wasm SIMD) */}
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {(
+                      [
+                        {
+                          id: 'auto',
+                          label: 'AUTO (WEBGPU → SIMD FALLBACK)',
+                        },
+                        {
+                          id: 'wasm',
+                          label: 'FORCE WASM SIMD (WORKER)',
+                        },
+                      ] as const
+                    ).map((bOpt) => {
+                      const active = hachiueBackendPref === bOpt.id;
+                      return (
+                        <button
+                          key={bOpt.id}
+                          type="button"
+                          disabled={isPreloadingWebLlm}
+                          onClick={async () => {
+                            soundEngine.playUiClick();
+                            setHachiueBackendPref(bOpt.id);
+                            saveHachiueBackendSelection(bOpt.id);
+                            if (isWebLlmReady()) {
+                              await unloadWebLlmEngine({
+                                preserveAutoLoad: true,
+                              });
+                              setWebLlmStatus(
+                                cachedModels[selectedWebLlmModel]
+                                  ? `BACKEND SET TO ${bOpt.id.toUpperCase()} (READY TO LOAD)`
+                                  : `BACKEND SET TO ${bOpt.id.toUpperCase()}`
+                              );
+                            }
+                          }}
+                          className={`cyber-btn py-1 px-2 border text-[9px] font-bold ${
+                            active
+                              ? 'border-[#FFE600] bg-[#FFE600]/15 text-[#FFE600]'
+                              : 'border-[#6C7A89]/40 bg-[#0D0618] text-[#6C7A89] hover:text-[#F2F5F8]'
+                          }`}
+                        >
+                          {bOpt.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* WebGPU / Wasm SIMD Model Selector (PLaMo 3 Translate & Bonsai 1/2 Lineup) */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                     {WEBLLM_MODEL_OPTIONS.map((m) => {
                       const active = selectedWebLlmModel === m.id;
@@ -415,11 +476,11 @@ export function SystemSettingsModal({
                             const currentGpuModel = getLoadedWebLlmModelId();
                             const gpuSuffix =
                               currentGpuModel && currentGpuModel !== m.id
-                                ? ` // ACTIVE GPU: ${currentGpuModel}`
+                                ? ` // ACTIVE: ${currentGpuModel}`
                                 : '';
                             setWebLlmStatus(
                               isWebLlmReady(m.id)
-                                ? 'READY IN VRAM'
+                                ? formatActiveHachiueReadyStatus()
                                 : isCached
                                 ? `CACHED ON DISK${gpuSuffix}`
                                 : `NOT DOWNLOADED${gpuSuffix}`
@@ -435,7 +496,9 @@ export function SystemSettingsModal({
                             <span>{m.label}</span>
                             <span className="text-[9px] text-[#FFE600] shrink-0">
                               {inVram
-                                ? '⚡ GPU READY'
+                                ? activeBackendInfo?.backend === 'wasm'
+                                  ? '⚡ SIMD READY'
+                                  : '⚡ GPU READY'
                                 : isCached
                                 ? '✓ CACHED'
                                 : `~${m.vram}`}
@@ -460,13 +523,13 @@ export function SystemSettingsModal({
                           disabled={isPreloadingWebLlm}
                           onClick={async () => {
                             soundEngine.playUiClick();
-                            setWebLlmStatus('RELEASING VRAM...');
+                            setWebLlmStatus('RELEASING MEMORY...');
                             await unloadWebLlmEngine();
-                            setWebLlmStatus('VRAM UNLOADED (0 MB RAM)');
+                            setWebLlmStatus('ENGINE UNLOADED (0 MB RAM)');
                           }}
                           className="text-[9px] text-[#FFE600] hover:text-[#00F5D4] underline cursor-pointer"
                         >
-                          UNLOAD VRAM
+                          UNLOAD ENGINE
                         </button>
                       )}
                       <button
@@ -477,7 +540,7 @@ export function SystemSettingsModal({
                           await purgeWebLlmDiskCache();
                           const updatedCache = await checkCachedWebLlmModels();
                           setCachedModels(updatedCache);
-                          setWebLlmStatus('DISK CACHE PURGED & VRAM UNLOADED');
+                          setWebLlmStatus('DISK CACHE PURGED & ENGINE UNLOADED');
                         }}
                         className="text-[9px] text-[#6C7A89] hover:text-[#FF1E7A] underline cursor-pointer"
                       >
@@ -494,7 +557,7 @@ export function SystemSettingsModal({
                         setWebLlmProgressPct(0);
                         void initWebLlmEngine(selectedWebLlmModel)
                           .then(async () => {
-                            setWebLlmStatus('READY IN VRAM');
+                            setWebLlmStatus(formatActiveHachiueReadyStatus());
                             const updatedCache = await checkCachedWebLlmModels();
                             setCachedModels(updatedCache);
                             soundEngine.playQuizCorrect(false);
@@ -512,17 +575,21 @@ export function SystemSettingsModal({
                       className="cyber-btn flex-1 py-1.5 px-2 bg-[#FFE600]/15 border border-[#FFE600] text-[#FFE600] font-bold text-[10px] hover:bg-[#FFE600]/25"
                     >
                       {isPreloadingWebLlm
-                        ? `DOWNLOADING IN BACKGROUND (${
+                        ? `LOADING IN BACKGROUND (${
                             webLlmProgressPct ?? 0
                           }%) — SAFE TO CLOSE CONFIG`
                         : isWebLlmReady(selectedWebLlmModel)
-                        ? 'MODEL LOADED IN VRAM (READY)'
+                        ? `MODEL LOADED (${
+                            activeBackendInfo?.backend === 'wasm'
+                              ? 'WASM SIMD'
+                              : 'WEBGPU'
+                          } READY)`
                         : cachedModels[selectedWebLlmModel]
                         ? `LOAD CACHED ${
                             WEBLLM_MODEL_OPTIONS.find(
                               (m) => m.id === selectedWebLlmModel
                             )?.label
-                          } INTO VRAM`
+                          }`
                         : `DOWNLOAD & LOAD ${
                             WEBLLM_MODEL_OPTIONS.find(
                               (m) => m.id === selectedWebLlmModel
@@ -692,12 +759,16 @@ export function SystemSettingsModal({
                               llmModel: profile.llmModel,
                               allowCloudApi: allowCloudTranslation,
                             });
+                            const runtimeInfo = getActiveHachiueBackendInfo();
                             translationProbe = {
                               term: probeTerm,
                               output: transRes.translation,
                               source:
                                 transRes.source === 'webllm'
-                                  ? 'HACHIUE'
+                                  ? `HACHIUE · ${
+                                      runtimeInfo?.label.toUpperCase() ||
+                                      'WEBGPU'
+                                    }`
                                   : transRes.source.toUpperCase(),
                             };
                           } catch (transErr) {
@@ -714,7 +785,7 @@ export function SystemSettingsModal({
 
                         const elapsedMs = Math.round(performance.now() - t0);
                         if (isWebLlmReady(selectedWebLlmModel)) {
-                          setWebLlmStatus('READY IN VRAM');
+                          setWebLlmStatus(formatActiveHachiueReadyStatus());
                         }
                         const q0 = passage.questions[0];
                         setLlmDiagResult({

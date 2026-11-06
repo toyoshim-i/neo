@@ -6,6 +6,7 @@ import {
   isValidTargetLanguageTranslation,
   prefetchModel,
   translateTerm,
+  type BackendInfo,
   type ParsedGgufHeader,
 } from 'hachiue';
 import { TrainingPassage, QuizQuestion } from '../types/schema';
@@ -15,9 +16,31 @@ export type LlmProviderType = 'webllm' | 'chrome_ai' | 'ollama' | 'rule_based';
 
 const LLM_PROVIDER_STORAGE_KEY = 'wetware_llm_provider';
 const MODEL_STORAGE_KEY = 'wetware_selected_webllm_model';
+const HACHIUE_BACKEND_STORAGE_KEY = 'wetware_hachiue_backend';
 const VERIFIED_MODEL_STORAGE_KEY = 'wetware_verified_webllm_model';
 const LOADING_GUARD_STORAGE_KEY = 'wetware_webllm_loading_in_progress';
 const STABILITY_VERIFICATION_MS = 10_000;
+
+export type HachiueBackendPreference = 'auto' | 'wasm';
+
+export function getSavedHachiueBackend(): HachiueBackendPreference {
+  if (typeof window !== 'undefined') {
+    const saved = window.localStorage.getItem(HACHIUE_BACKEND_STORAGE_KEY);
+    if (saved === 'auto' || saved === 'wasm') {
+      return saved;
+    }
+  }
+  return 'auto';
+}
+
+export function saveHachiueBackendSelection(
+  backend: HachiueBackendPreference
+): void {
+  translationResultCache.clear();
+  if (typeof window !== 'undefined') {
+    window.localStorage.setItem(HACHIUE_BACKEND_STORAGE_KEY, backend);
+  }
+}
 
 let stabilityTimerId: ReturnType<typeof setTimeout> | null = null;
 
@@ -520,6 +543,22 @@ export function isWebGpuSupported(): boolean {
   return typeof navigator !== 'undefined' && 'gpu' in navigator;
 }
 
+export function isHachiueSupported(): boolean {
+  return isWebGpuSupported() || typeof WebAssembly !== 'undefined';
+}
+
+export function getActiveHachiueBackendInfo(): BackendInfo | null {
+  return globalState.engine?.backendInfo ?? null;
+}
+
+export function formatActiveHachiueReadyStatus(): string {
+  const info = globalState.engine?.backendInfo;
+  if (!info) return 'READY IN VRAM';
+  return info.backend === 'wasm'
+    ? 'READY IN WORKER (WASM SIMD)'
+    : 'READY IN VRAM (WEBGPU)';
+}
+
 export function isWebLlmReady(modelId?: string): boolean {
   if (!globalState.engine || !globalState.loadedModelId) return false;
   if (!modelId) return true;
@@ -665,33 +704,37 @@ export async function prefetchWebLlmModelToCache(
 }
 
 /**
- * Initializes (or reuses) the in-browser `hachiue` WebGPU engine for Bonsai 1 (1-bit Q1_0)
- * and Bonsai 2 (Ternary 1.58-bit PTQ1_0 / PQ2_0 + FWHT + Qwen3.5 Gated DeltaNet) GGUF models.
+ * Initializes (or reuses) the in-browser `hachiue` engine (WebGPU with automatic Wasm SIMD Worker fallback)
+ * for PLaMo 3 Translate, Bonsai 1 (1-bit Q1_0), and Bonsai 2 (Ternary PTQ1_0 / PQ2_0) GGUF models.
  *
- * When switching from an active model in VRAM to a model that is not yet downloaded:
+ * When switching from an active model to a model that is not yet downloaded:
  * - Phase 1 streams the new model to OPFS / IndexedDB cache FIRST while keeping the previous
- *   model active in VRAM so translations continue uninterrupted during the download.
- * - Phase 2 unloads the previous model from VRAM and loads the new model from local cache.
+ *   model active so translations continue uninterrupted during the download.
+ * - Phase 2 unloads the previous model and loads the new model from local cache.
  */
 export async function initWebLlmEngine(
   modelId: string = DEFAULT_WEBLLM_MODEL,
   onProgress?: (text: string, progress: number) => void
 ): Promise<HachiueEngine> {
-  if (!isWebGpuSupported()) {
+  if (!isHachiueSupported()) {
     throw new Error(
-      'WebGPU is not available in this browser context (requires Secure Context: localhost or HTTPS).'
+      'Neither WebGPU nor WebAssembly SIMD is available in this browser context.'
     );
   }
 
   const matchedOption =
     WEBLLM_MODEL_OPTIONS.find(
       (m) => m.id.toLowerCase() === modelId.toLowerCase()
-    ) || WEBLLM_MODEL_OPTIONS[1];
+    ) || WEBLLM_MODEL_OPTIONS[0];
   const resolvedModelId = matchedOption.id;
+  const preferredBackend = getSavedHachiueBackend();
 
   if (
     globalState.engine &&
-    globalState.loadedModelId?.toLowerCase() === resolvedModelId.toLowerCase()
+    globalState.loadedModelId?.toLowerCase() ===
+      resolvedModelId.toLowerCase() &&
+    (preferredBackend === 'auto' ||
+      globalState.engine.backend === preferredBackend)
   ) {
     return globalState.engine;
   }
@@ -734,7 +777,7 @@ export async function initWebLlmEngine(
       }
 
       // Phase 1: If the target model is not cached yet, download it to OPFS / IndexedDB FIRST
-      // while keeping the previous model active in VRAM (`globalState.engine`) so the user
+      // while keeping the previous model active (`globalState.engine`) so the user
       // can continue translating with the previous model until the download finishes!
       const alreadyCached = await isModelCached(matchedOption.url).catch(
         () => false
@@ -766,18 +809,18 @@ export async function initWebLlmEngine(
         });
       }
 
-      // Phase 2: Wait for any in-flight inference on the previous model, then swap VRAM
+      // Phase 2: Wait for any in-flight inference on the previous model, then swap active engine
       await runSerializedInference(async () => {});
 
       if (globalState.engine) {
         notifyProgress({
-          text: 'Swapping VRAM to new model...',
+          text: 'Swapping engine to new model...',
           progress: alreadyCached ? 0 : 0.86,
         });
         await unloadWebLlmEngine({ preserveAutoLoad: true });
       }
 
-      // Set crash-loop guard right before WebGPU buffer allocation (`HachiueEngine.create`).
+      // Set crash-loop guard right before WebGPU / Wasm SIMD allocation (`HachiueEngine.create`).
       // Cleared once the model finishes loading and runs stably for `STABILITY_VERIFICATION_MS`.
       if (typeof window !== 'undefined') {
         window.localStorage.setItem(LOADING_GUARD_STORAGE_KEY, resolvedModelId);
@@ -785,6 +828,7 @@ export async function initWebLlmEngine(
 
       const engine = await HachiueEngine.create({
         url: matchedOption.url,
+        backend: preferredBackend,
         maxSeqLen: 512,
         onProgress: (p) => {
           if (p.phase === 'weights' && p.totalBytes) {
@@ -795,8 +839,10 @@ export async function initWebLlmEngine(
               : 0.86 + rawRatio * 0.14;
             const mb = ((p.loadedBytes ?? 0) / 1048576).toFixed(0);
             const totMb = (p.totalBytes / 1048576).toFixed(0);
+            const targetName =
+              p.backend === 'wasm' ? 'Wasm SIMD Worker' : 'WebGPU';
             notifyProgress({
-              text: `Uploading cached GGUF to WebGPU: ${mb} / ${totMb} MiB`,
+              text: `Uploading cached GGUF to ${targetName}: ${mb} / ${totMb} MiB`,
               progress: scaledRatio,
             });
           } else if (p.message) {
