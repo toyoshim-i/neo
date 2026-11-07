@@ -554,9 +554,12 @@ export function getActiveHachiueBackendInfo(): BackendInfo | null {
 export function formatActiveHachiueReadyStatus(): string {
   const info = globalState.engine?.backendInfo;
   if (!info) return 'READY IN VRAM';
-  return info.backend === 'wasm'
-    ? 'READY IN WORKER (WASM SIMD)'
-    : 'READY IN VRAM (WEBGPU)';
+  if (info.backend === 'wasm') {
+    return info.isWorker
+      ? 'READY IN WORKER (WASM SIMD)'
+      : 'READY ON MAIN THREAD (WASM SIMD)';
+  }
+  return 'READY IN VRAM (WEBGPU)';
 }
 
 export function isWebLlmReady(modelId?: string): boolean {

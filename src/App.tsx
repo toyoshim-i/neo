@@ -488,6 +488,16 @@ export function App() {
           (typeof window !== 'undefined' ? window.innerHeight / 2 + 20 : 240),
       }));
 
+      // Yield a paint frame so the LexiconPopover (`TRANSLATING...`) renders
+      // on screen before synchronous tokenization or main-thread fallback runs.
+      await new Promise<void>((resolve) => {
+        if (typeof window !== 'undefined' && 'requestAnimationFrame' in window) {
+          window.requestAnimationFrame(() => window.setTimeout(resolve, 0));
+        } else {
+          setTimeout(resolve, 0);
+        }
+      });
+
       try {
         const res = await translateSelection({
           text: queryText,
